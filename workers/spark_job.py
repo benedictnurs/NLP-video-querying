@@ -20,6 +20,8 @@ _WORKER_MODELS: dict | None = None
 
 
 def process_video_on_spark(video: dict) -> dict:
+    if video.get("cached") and video.get("status") == "graphed":
+        return video
     _prepare_media(video)
     windows = list(enumerate(clip_windows(float(video["duration_s"]))))
     payloads = [(video, index, start, end) for index, (start, end) in windows]

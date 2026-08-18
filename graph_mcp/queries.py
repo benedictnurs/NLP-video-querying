@@ -78,6 +78,11 @@ BLOCKS = {
         "use": "A traffic_stop or interrogation that spans clips.",
         "params": ["event_type"],
     },
+    "find_events": {
+        "title": "Find events by definition across videos",
+        "use": "find all dui, all miranda rights, all traffic stops. Uses topics/aliases. Optional video_id.",
+        "params": ["query", "video_id"],
+    },
     "list_videos": {
         "title": "Ingested videos",
         "use": "What footage is in the graph.",
@@ -95,57 +100,107 @@ def clock_seconds(value) -> float | None:
     return parsed / 1000.0
 
 
-def count_events(event_type: str = ""):
+def count_events(event_type: str = "", video_id: str = ""):
     return (
         """
         MATCH (e:Event)
-        WHERE $event_type = '' OR e.type = $event_type
+        WHERE ($event_type = '' OR e.type = $event_type)
+          AND ($video_id = '' OR e.video_id = $video_id)
         RETURN e.type AS event_type, count(*) AS n
         ORDER BY n DESC
         """,
-        {"event_type": (event_type or "").strip()},
+        {"event_type": (event_type or "").strip(), "video_id": (video_id or "").strip()},
     )
 
 
-def events_in_timeframe(start_s: float, end_s: float, event_type: str = ""):
+def events_in_timeframe(start_s: float, end_s: float, event_type: str = "", video_id: str = ""):
     return (
         """
         MATCH (e:Event)
         WHERE e.seek_s >= $start_s AND e.seek_s <= $end_s
           AND ($event_type = '' OR e.type = $event_type)
+          AND ($video_id = '' OR e.video_id = $video_id)
+        OPTIONAL MATCH (c:Clip)-[:CONTAINS]->(e)
         OPTIONAL MATCH (e)-[r:INVOLVES]->(p:Person)
-        WITH e, collect(DISTINCT {id: p.local_id, role: r.role, clothes: p.clothes}) AS people
-        RETURN e.type AS event_type,
+        WITH e, c, collect(DISTINCT {id: p.local_id, role: r.role, clothes: p.clothes}) AS people
+        RETURN e.video_id AS video_id,
+               e.source_name AS source_name,
+               e.type AS event_type,
                e.start_timestamp AS start_timestamp,
                e.end_timestamp AS end_timestamp,
                e.seek_s AS seek_s,
                e.summary AS summary,
                e.subject_ids AS subject_ids,
+               c.local_id AS clip,
+               c.clip_uri AS clip_uri,
+               c.splice_uri AS splice_uri,
+               c.tagged_splice_uri AS tagged_splice_uri,
                people
-        ORDER BY e.seek_s
+        ORDER BY e.video_id, e.seek_s
         """,
-        {"start_s": start_s, "end_s": end_s, "event_type": (event_type or "").strip()},
+        {
+            "start_s": start_s,
+            "end_s": end_s,
+            "event_type": (event_type or "").strip(),
+            "video_id": (video_id or "").strip(),
+        },
     )
 
 
-def events_by_type(event_type: str):
+def events_by_type(event_type: str, video_id: str = ""):
     return (
         """
         MATCH (e:Event {type: $event_type})
+        WHERE $video_id = '' OR e.video_id = $video_id
         OPTIONAL MATCH (c:Clip)-[:CONTAINS]->(e)
         OPTIONAL MATCH (e)-[r:INVOLVES]->(p:Person)
         WITH e, c, collect(DISTINCT {id: p.local_id, role: r.role, clothes: p.clothes, potential_suspect: p.potential_suspect}) AS people
-        RETURN e.type AS event_type,
+        RETURN e.video_id AS video_id,
+               e.source_name AS source_name,
+               e.type AS event_type,
                e.start_timestamp AS start_timestamp,
                e.end_timestamp AS end_timestamp,
                e.seek_s AS seek_s,
                e.summary AS summary,
                c.local_id AS clip,
                c.clip_uri AS clip_uri,
+               c.splice_uri AS splice_uri,
+               c.tagged_splice_uri AS tagged_splice_uri,
                people
-        ORDER BY e.seek_s
+        ORDER BY e.video_id, e.seek_s
         """,
-        {"event_type": event_type.strip()},
+        {"event_type": event_type.strip(), "video_id": (video_id or "").strip()},
+    )
+
+
+def events_by_types(event_types: list[str], video_id: str = ""):
+    return (
+        """
+        MATCH (e:Event)
+        WHERE e.type IN $event_types
+          AND ($video_id = '' OR e.video_id = $video_id)
+        OPTIONAL MATCH (c:Clip)-[:CONTAINS]->(e)
+        OPTIONAL MATCH (e)-[:INSTANCE_OF]->(t:EventType)
+        OPTIONAL MATCH (t)-[:IN_TOPIC]->(topic:Topic)
+        OPTIONAL MATCH (e)-[r:INVOLVES]->(p:Person)
+        WITH e, c, collect(DISTINCT topic.id) AS topics,
+             collect(DISTINCT {id: p.local_id, role: r.role, clothes: p.clothes}) AS people
+        RETURN e.video_id AS video_id,
+               e.source_name AS source_name,
+               e.type AS event_type,
+               e.start_timestamp AS start_timestamp,
+               e.end_timestamp AS end_timestamp,
+               e.seek_s AS seek_s,
+               e.summary AS summary,
+               c.local_id AS clip,
+               c.clip_uri AS clip_uri,
+               c.splice_uri AS splice_uri,
+               c.tagged_splice_uri AS tagged_splice_uri,
+               topics,
+               people
+        ORDER BY e.video_id, e.seek_s
+        """,
+        {"event_types": event_types, "video_id": (video_id or "").strip()},
     )
 
 
@@ -333,7 +388,9 @@ def search_transcript(phrase: str):
                c.start_timestamp AS start_timestamp,
                c.end_timestamp AS end_timestamp,
                c.summary AS summary,
-               c.clip_uri AS clip_uri
+               c.clip_uri AS clip_uri,
+               c.splice_uri AS splice_uri,
+               c.tagged_splice_uri AS tagged_splice_uri
         ORDER BY c.index
         """,
         {"phrase": phrase.strip()},
@@ -344,11 +401,14 @@ def clip_at_timestamp():
     return (
         """
         MATCH (c:Clip)
-        RETURN c.local_id AS clip,
+        RETURN c.video_id AS video_id,
+               c.local_id AS clip,
                c.start_timestamp AS start_timestamp,
                c.end_timestamp AS end_timestamp,
                c.summary AS summary,
                c.clip_uri AS clip_uri,
+               c.splice_uri AS splice_uri,
+               c.tagged_splice_uri AS tagged_splice_uri,
                c.index AS index
         ORDER BY c.index
         """,
@@ -389,6 +449,26 @@ def list_videos():
                vehicles
         """,
         {},
+    )
+
+
+def clip_attachments(video_id: str = "", clip: str = ""):
+    return (
+        """
+        MATCH (c:Clip)
+        WHERE ($video_id = '' OR c.video_id = $video_id)
+          AND ($clip = '' OR c.local_id = $clip OR c.id ENDS WITH $clip)
+        RETURN c.video_id AS video_id,
+               c.local_id AS clip,
+               c.start_timestamp AS start_timestamp,
+               c.end_timestamp AS end_timestamp,
+               c.clip_uri AS clip_uri,
+               c.splice_uri AS splice_uri,
+               c.tagged_splice_uri AS tagged_splice_uri,
+               c.audio_uri AS audio_uri
+        ORDER BY c.video_id, c.index
+        """,
+        {"video_id": (video_id or "").strip(), "clip": (clip or "").strip()},
     )
 
 

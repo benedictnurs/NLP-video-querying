@@ -2,16 +2,34 @@ PRIMER = """
 Police video intelligence graph
 Purpose: help officers and analysts reconstruct bodycam/dashcam footage quickly — who was present, what happened, when, and which objects/vehicles/plates are the same across clips. This is an investigative index, not a charging system.
 
-How to use this MCP
+How to use this MCP (Code Four)
 1. Call explain_graph_context first in every session (this primer).
-2. Prefer a prebuilt query block (list_query_blocks, then the matching tool).
-3. Use run_custom_cypher only when no prebuilt block fits. Read-only MATCH/RETURN only.
+2. Compose Neo4j from blocks. list_query_blocks shows sources, filters, joins, outputs, and recipes.
+3. Snap blocks together and execute:
+   - run_recipe("all_dui") / run_recipe("all_miranda") for named pipelines
+   - run_blocks("events | topic query=dui | with_people | with_clip | return_events")
+   - preview_blocks(...) to see Cypher first
+   - JSON also works: [{"block":"events"},{"block":"topic","query":"dui"},{"block":"return_events"}]
+4. Shortcut tools (find_events, events_in_timeframe, find_people, ...) still work; they are the same recipes.
+5. To view AND analyze footage: analyze_scene(clip="clip_0009") returns the tagged splice.jpg (and optional frames) as images for Codex, and opens Finder. open_in_finder / open_clip_attachment only reveal the file. Graph media URIs are local data/ paths (rewrite_media_paths if you still see /opt/airflow/data).
+6. Use run_custom_cypher only when no block combination fits. Read-only MATCH/RETURN only.
+
+Videos
+- Drop files in videos/. Each file is cached after it is graphed (video_1.mp4 -> video_1).
+- Same file is not reprocessed. Adding video_2.mp4 only ingests that file; video_1 stays in cache and in Neo4j.
+- video_id is the file stem (video_1, video_2, ...). Queries default to ALL videos. Pass video_id to limit to one.
+
+Topics (bundles, not charges)
+- Topic nodes group EventTypes: dui -> field_sobriety_test, miranda -> miranda_warning.
+- find_events("dui") / find_events("miranda rights") searches every ingested video.
+- Event.type is the catalog id. Topic is the officer-facing bundle.
 
 Nodes
 - Video: one ingested file. id, source_name, duration_s, clip_count, status.
-- Clip: ~3 minute slice with overlap. local_id (clip_0000), start_timestamp, end_timestamp (MM:SS in the full video), summary, transcript, clip_uri.
+- Clip: ~3 minute slice with overlap. local_id (clip_0000), start_timestamp, end_timestamp (MM:SS in the full video), summary, transcript, clip_uri, splice_uri, tagged_splice_uri (YOLO-labeled splice.jpg). Media URIs are local files under data/videos/<video_id>/clips/. Use analyze_scene to load those images into Codex.
 - Event: something that happened in a clip. type is a catalog id (traffic_stop, miranda_warning, arrest, ...). start_timestamp / end_timestamp are seekable clocks, not milliseconds. seek_s is seconds from video start. subject_ids are potential_suspect person local ids on that event.
-- EventType: catalog definition for Event.type. Traffic stop, Miranda, arrest, etc. Scene labels, not charges.
+- EventType: catalog definition for Event.type. Aliases and topics live here.
+- Topic: bundle of EventTypes for queries like "all DUI" or "all Miranda" across videos. Not a charge.
 - Person: canonical identity across clips (person_1, person_3). clothes, race, gender, hair, glasses, description, is_cop (uniform appearance only), role (officer | civilian | potential_suspect). potential_suspect is who the officer is stopping/arresting/questioning — not guilt.
 - Vehicle: canonical car across clips. color, plate, analysis.
 - Object: notable item (bottle, bag, phone). label, distinctive.
@@ -26,7 +44,7 @@ Relationships
 - (Event)-[:INVOLVES {role}]->(Person)  role = officer | potential_suspect | civilian | unknown
 - (Event)-[:INVOLVES]->(Vehicle|Object)
 - (Event)-[:CONTINUES]->(Event)  same type spanning adjacent clips (one traffic_stop across time)
-- (Vehicle)-[:HAS_PLATE]->(Plate)
+- (EventType)-[:IN_TOPIC]->(Topic) and (Topic)-[:BUNDLES]->(EventType)
 
 Timestamps
 - Always use Event.start_timestamp / end_timestamp (and Clip.start_timestamp / end_timestamp), e.g. "01:56".

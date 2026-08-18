@@ -43,6 +43,11 @@ def list_new_videos() -> list[str]:
     return pending
 
 
+def next_new_video() -> str | None:
+    pending = list_new_videos()
+    return pending[0] if pending else None
+
+
 def run_ingest(source_path: str) -> dict:
     source = Path(source_path)
     if not source.is_file():

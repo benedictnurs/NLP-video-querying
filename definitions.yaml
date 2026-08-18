@@ -1,6 +1,47 @@
 # Observable event buckets for police video. These are scene labels, not charges.
 # Each top-level id is the Event.type in Neo4j (e.g. traffic_stop).
 # Gemini may add a new id when nothing here fits, and may edit aliases/phrases on an existing id.
+# topics: bundles for cross-video queries like "find all dui" or "find all miranda rights". Not charges.
+
+topics:
+  dui:
+    title: DUI / impairment investigation
+    aliases:
+    - dui
+    - dwi
+    - impaired driving
+    - sobriety
+    - field sobriety
+    - drunk driving
+    event_types:
+    - field_sobriety_test
+    description: Observable roadside impairment procedures across videos. Not a DUI charge.
+  miranda:
+    title: Miranda rights
+    aliases:
+    - miranda
+    - miranda rights
+    - rights reading
+    - miranda warning
+    event_types:
+    - miranda_warning
+    description: Miranda warnings across all ingested videos.
+  traffic_stop:
+    title: Traffic stops
+    aliases:
+    - traffic stop
+    - pulled over
+    - roadside stop
+    event_types:
+    - traffic_stop
+  arrest:
+    title: Arrests
+    aliases:
+    - arrest
+    - taken into custody
+    event_types:
+    - arrest
+    - handcuffing
 
 traffic_stop:
   type: event
@@ -52,7 +93,11 @@ miranda_warning:
   title: Reading Miranda rights
   aliases:
   - miranda
+  - miranda rights
   - rights_advisory
+  - rights reading
+  topics:
+  - miranda
   description: 'Officer reads or paraphrases the right to remain silent, that statements can
     be used, and the right to an attorney.
 
@@ -232,6 +277,11 @@ field_sobriety_test:
   - follow my finger
   - nystagmus
   - stand on one leg
+  - dui
+  - dwi
+  - sobriety test
+  topics:
+  - dui
   source: gemini
 medical_aid:
   type: event

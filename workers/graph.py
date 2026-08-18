@@ -2,15 +2,16 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 
 from neo4j import GraphDatabase
 
 from workers.clips import load_clip_records
 from workers.clock import format_clock
-from workers.events import load_definitions
+from workers.events import load_definitions, load_topics
 from workers.fingerprint import RARE_ON_ROAD, WATER_LABELS
 from workers.ingest import load_registry, save_registry_entry
-from workers.paths import video_work_dir
+from workers.paths import persist_media_uri, video_work_dir
 
 
 def write_video_graph(video: dict) -> dict:
@@ -26,6 +27,10 @@ def write_video_graph(video: dict) -> dict:
         with driver.session() as session:
             _ensure_constraints(session)
             _upsert_event_types(session)
+            _upsert_topics(session)
+            for old_id in _previous_ids(video):
+                if old_id != video["video_id"]:
+                    _wipe_video_graph(session, old_id)
             session.run(
                 """
                 MERGE (v:Video {id: $video_id})
@@ -45,10 +50,10 @@ def write_video_graph(video: dict) -> dict:
                 """,
                 video_id=video["video_id"],
                 source_name=video.get("source_name"),
-                source_path=video.get("source_path"),
-                original_uri=video.get("original_uri"),
-                audio_uri=video.get("audio_uri"),
-                processing_uri=video.get("processing_uri"),
+                source_path=persist_media_uri(video.get("source_path")),
+                original_uri=persist_media_uri(video.get("original_uri")),
+                audio_uri=persist_media_uri(video.get("audio_uri")),
+                processing_uri=persist_media_uri(video.get("processing_uri")),
                 duration_s=video.get("duration_s"),
                 fps=video.get("fps"),
                 width=video.get("width"),
@@ -60,6 +65,8 @@ def write_video_graph(video: dict) -> dict:
             _reset_video_observations(session, video["video_id"])
             clip_ids = []
             for record in clips:
+                record["video_id"] = video["video_id"]
+                record["source_name"] = video.get("source_name") or ""
                 clip_id = f"{video['video_id']}:{record['id']}"
                 clip_ids.append(clip_id)
                 _write_clip(session, video, record, clip_id)
@@ -77,7 +84,13 @@ def write_video_graph(video: dict) -> dict:
     if source_name:
         registry = load_registry()
         fingerprint = (registry.get(source_name) or {}).get("fingerprint", "")
-        save_registry_entry(source_name, video["video_id"], fingerprint, "graphed")
+        save_registry_entry(
+            source_name,
+            video["video_id"],
+            fingerprint,
+            "graphed",
+            video.get("size_bytes"),
+        )
     return video
 
 
@@ -146,10 +159,10 @@ def _write_clip(session, video: dict, record: dict, clip_id: str) -> None:
         needs_vision=bool(record.get("needs_vision")),
         important=record.get("important") or [],
         analysis_status=record.get("analysis_status"),
-        splice_uri=record.get("splice_uri"),
-        tagged_splice_uri=record.get("tagged_splice_uri"),
-        clip_uri=record.get("clip_uri"),
-        audio_uri=record.get("audio_uri"),
+        splice_uri=persist_media_uri(record.get("splice_uri")),
+        tagged_splice_uri=persist_media_uri(record.get("tagged_splice_uri")),
+        clip_uri=persist_media_uri(record.get("clip_uri")),
+        audio_uri=persist_media_uri(record.get("audio_uri")),
     )
 
 
@@ -190,6 +203,42 @@ def _link_clip_chain(session, video_id: str, clip_ids: list[str]) -> None:
         MERGE (prev)-[:NEXT]->(nxt)
         """,
         pairs=pairs,
+    )
+
+
+def _previous_ids(video: dict) -> list[str]:
+    ids = []
+    for key in ("video_id", "previous_video_id"):
+        value = video.get(key)
+        if value and value not in ids:
+            ids.append(value)
+    source = video.get("source_name") or ""
+    if source:
+        from workers.ingest import make_video_id
+
+        stem_id = make_video_id(Path(source))
+        if stem_id not in ids:
+            ids.append(stem_id)
+    return ids
+
+
+def _wipe_video_graph(session, video_id: str) -> None:
+    session.run(
+        """
+        MATCH (n)
+        WHERE n.video_id = $video_id
+        DETACH DELETE n
+        """,
+        video_id=video_id,
+    )
+    session.run(
+        """
+        MATCH (n)
+        WHERE (n:Video OR n:Clip OR n:Event) AND (n.id = $video_id OR n.id STARTS WITH $prefix)
+        DETACH DELETE n
+        """,
+        video_id=video_id,
+        prefix=f"{video_id}:",
     )
 
 
@@ -420,23 +469,64 @@ def _upsert_event_types(session) -> None:
             spec.get("title") or name.replace("_", " "),
             spec.get("description") or "",
             spec.get("aliases") or [],
+            spec.get("topics") or [],
         )
 
 
-def _merge_event_type(session, type_id: str, title: str, description: str, aliases: list) -> None:
+def _upsert_topics(session) -> None:
+    for topic_id, spec in load_topics().items():
+        session.run(
+            """
+            MERGE (topic:Topic {id: $topic_id})
+            SET topic.title = $title,
+                topic.description = $description,
+                topic.aliases = $aliases
+            """,
+            topic_id=topic_id,
+            title=spec.get("title") or topic_id.replace("_", " "),
+            description=" ".join(str(spec.get("description") or "").split()),
+            aliases=list(spec.get("aliases") or []),
+        )
+        for type_id in spec.get("event_types") or []:
+            session.run(
+                """
+                MERGE (t:EventType {id: $type_id})
+                MERGE (topic:Topic {id: $topic_id})
+                MERGE (t)-[:IN_TOPIC]->(topic)
+                MERGE (topic)-[:BUNDLES]->(t)
+                """,
+                type_id=str(type_id),
+                topic_id=topic_id,
+            )
+
+
+def _merge_event_type(session, type_id: str, title: str, description: str, aliases: list, topics: list | None = None) -> None:
     session.run(
         """
         MERGE (t:EventType {id: $type_id})
         SET t.title = $title,
             t.name = $title,
             t.description = $description,
-            t.aliases = $aliases
+            t.aliases = $aliases,
+            t.topics = $topics
         """,
         type_id=type_id,
         title=title,
         description=" ".join(str(description).split()),
         aliases=list(aliases),
+        topics=list(topics or []),
     )
+    for topic_id in topics or []:
+        session.run(
+            """
+            MERGE (t:EventType {id: $type_id})
+            MERGE (topic:Topic {id: $topic_id})
+            MERGE (t)-[:IN_TOPIC]->(topic)
+            MERGE (topic)-[:BUNDLES]->(t)
+            """,
+            type_id=type_id,
+            topic_id=str(topic_id),
+        )
 
 
 def _write_event(session, clip_id: str, clip: dict, event: dict) -> None:
@@ -463,6 +553,8 @@ def _write_event(session, clip_id: str, clip: dict, event: dict) -> None:
             e.important = $important,
             e.transcript = $transcript,
             e.context = $context,
+            e.video_id = $video_id,
+            e.source_name = $source_name,
             e.start_timestamp = $start_timestamp,
             e.end_timestamp = $end_timestamp,
             e.seek_s = $seek_s,
@@ -488,6 +580,7 @@ def _write_event(session, clip_id: str, clip: dict, event: dict) -> None:
         important=event.get("important") or clip.get("important") or [],
         transcript=(event.get("transcript") or clip.get("transcript") or ""),
         context=event.get("context"),
+        source_name=clip.get("source_name") or "",
         start_timestamp=times["start_timestamp"],
         end_timestamp=times["end_timestamp"],
         seek_s=times["seek_s"],
@@ -625,6 +718,12 @@ def _ensure_constraints(session) -> None:
         """
         CREATE CONSTRAINT event_type_id IF NOT EXISTS
         FOR (t:EventType) REQUIRE t.id IS UNIQUE
+        """
+    )
+    session.run(
+        """
+        CREATE CONSTRAINT topic_id IF NOT EXISTS
+        FOR (t:Topic) REQUIRE t.id IS UNIQUE
         """
     )
     session.run(

@@ -19,17 +19,89 @@ _BLOCKED = re.compile(
 
 
 def learned_path() -> Path:
-    return Path(os.environ.get("DEFINITIONS_LEARNED_PATH", str(data_dir() / "definitions_learned.yaml")))
+    env = os.environ.get("DEFINITIONS_LEARNED_PATH")
+    if env:
+        return Path(env)
+    return data_dir() / "definitions_learned.yaml"
 
 
 def definition_path() -> Path:
-    return Path(os.environ.get("DEFINITIONS_PATH", "/opt/airflow/definitions.yaml"))
+    env = os.environ.get("DEFINITIONS_PATH")
+    if env:
+        return Path(env)
+    airflow = Path("/opt/airflow/definitions.yaml")
+    if airflow.exists():
+        return airflow
+    return Path(__file__).resolve().parents[1] / "definitions.yaml"
 
 
-def load_definitions() -> dict:
+_RESERVED = {"topics"}
+
+
+def load_raw_catalog() -> dict:
     core = _read_yaml(definition_path())
     learned = _read_yaml(learned_path())
     return {**learned, **core}
+
+
+def load_definitions() -> dict:
+    return {
+        key: spec
+        for key, spec in load_raw_catalog().items()
+        if key not in _RESERVED and isinstance(spec, dict)
+    }
+
+
+def load_topics() -> dict:
+    topics = load_raw_catalog().get("topics") or {}
+    if not isinstance(topics, dict):
+        return {}
+    return {key: spec for key, spec in topics.items() if isinstance(spec, dict)}
+
+
+def resolve_event_query(query: str) -> dict:
+    raw = (query or "").strip().lower()
+    skip = {"find", "all", "show", "list", "the", "every", "events", "event", "of", "for", "videos"}
+    tokens = [part for part in re.split(r"\W+", raw) if part and part not in skip]
+    needle = " ".join(tokens) or raw
+    slug = _slug(needle)
+    types: set[str] = set()
+    topics_hit: list[str] = []
+    definitions = load_definitions()
+    for topic_id, spec in load_topics().items():
+        names = [topic_id, spec.get("title") or "", *(spec.get("aliases") or [])]
+        if _query_hits(needle, slug, names):
+            topics_hit.append(topic_id)
+            types.update(str(item) for item in (spec.get("event_types") or []) if item)
+    for name, spec in definitions.items():
+        names = [
+            name,
+            spec.get("title") or "",
+            *(spec.get("aliases") or []),
+            *(spec.get("topics") or []),
+        ]
+        if _query_hits(needle, slug, names):
+            types.add(name)
+    if not types and slug in definitions:
+        types.add(slug)
+    return {
+        "query": query,
+        "normalized": needle,
+        "topics": topics_hit,
+        "event_types": sorted(types),
+    }
+
+
+def _query_hits(needle: str, slug: str, names: list) -> bool:
+    for name in names:
+        text = str(name or "").strip().lower()
+        if not text:
+            continue
+        if needle == text or slug == _slug(text):
+            return True
+        if needle in text or text in needle:
+            return True
+    return False
 
 
 def catalog_for_prompt(definitions: dict | None = None) -> str:
@@ -121,7 +193,11 @@ def persist_new_definitions(proposals: list[dict], updates: list[dict] | None = 
     with _LOCK:
         core = _read_yaml(definition_path())
         learned = _read_yaml(learned_path())
-        catalog = {**learned, **core}
+        catalog = {
+            key: spec
+            for key, spec in {**learned, **core}.items()
+            if key not in _RESERVED and isinstance(spec, dict)
+        }
         for raw in proposals:
             spec = _proposal_to_spec(raw)
             if not spec:
@@ -235,15 +311,23 @@ def _merge_lists(old, new, cap: int) -> list[str]:
 def _write_definitions(catalog: dict) -> None:
     path = definition_path()
     path.parent.mkdir(parents=True, exist_ok=True)
+    topics = load_topics()
+    payload = dict(catalog)
+    payload.pop("topics", None)
+    dumped = {}
+    if topics:
+        dumped["topics"] = topics
+    dumped.update(payload)
     header = (
         "# Observable event buckets for police video. These are scene labels, not charges.\n"
         "# Each top-level id is the Event.type in Neo4j (e.g. traffic_stop).\n"
-        "# Gemini may add a new id when nothing here fits, and may edit aliases/phrases on an existing id.\n\n"
+        "# Gemini may add a new id when nothing here fits, and may edit aliases/phrases on an existing id.\n"
+        "# topics: bundles for cross-video queries (dui, miranda). Not charges.\n\n"
     )
     path.write_text(
         header
         + yaml.safe_dump(
-            catalog,
+            dumped,
             sort_keys=False,
             allow_unicode=True,
             default_flow_style=False,

@@ -1,4 +1,5 @@
 .env
+.cursor/mcp.json
 logs/
 data/videos/
 data/registry.json

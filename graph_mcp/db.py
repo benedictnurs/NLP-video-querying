@@ -8,6 +8,8 @@ from neo4j import GraphDatabase
 from neo4j.graph import Node, Path as GraphPath, Relationship
 from neo4j.time import Date, DateTime, Time
 
+from graph_mcp.media import localize_payload
+
 ROOT = Path(__file__).resolve().parents[1]
 _DRIVER = None
 
@@ -84,4 +86,4 @@ def to_json(value):
 
 
 def dumps(payload) -> str:
-    return json.dumps(payload, indent=2, default=str)
+    return json.dumps(localize_payload(payload), indent=2, default=str)
