@@ -1,0 +1,12 @@
+.env
+logs/
+data/videos/
+data/registry.json
+data/models/
+data/definitions_learned.yaml
+videos/*
+!videos/.gitkeep
+__pycache__/
+*.py[cod]
+.DS_Store
+.venv/
