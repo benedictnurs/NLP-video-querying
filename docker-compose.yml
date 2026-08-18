@@ -21,9 +21,6 @@ x-airflow-common: &airflow-common
     OPENROUTER_FINGERPRINT_MODEL: ${OPENROUTER_FINGERPRINT_MODEL:-google/gemini-3.5-flash}
     WHISPER_MODEL: ${WHISPER_MODEL:-Systran/faster-whisper-tiny.en}
     YOLO_ONNX_URL: ${YOLO_ONNX_URL:-https://huggingface.co/Kalray/yolov8/resolve/main/yolov8n.onnx}
-    CAPTION_ENCODER_URL: ${CAPTION_ENCODER_URL:-https://huggingface.co/Xenova/vit-gpt2-image-captioning/resolve/main/onnx/encoder_model_quantized.onnx}
-    CAPTION_DECODER_URL: ${CAPTION_DECODER_URL:-https://huggingface.co/Xenova/vit-gpt2-image-captioning/resolve/main/onnx/decoder_model_quantized.onnx}
-    CAPTION_TOKENIZER_URL: ${CAPTION_TOKENIZER_URL:-https://huggingface.co/Xenova/vit-gpt2-image-captioning/resolve/main/tokenizer.json}
     DEFINITIONS_PATH: /opt/airflow/definitions.yaml
     DEFINITIONS_LEARNED_PATH: /opt/airflow/data/definitions_learned.yaml
     CLIP_SECONDS: ${CLIP_SECONDS:-180}
@@ -196,9 +193,6 @@ services:
       HF_HOME: /opt/airflow/data/models/huggingface
       WHISPER_MODEL: ${WHISPER_MODEL:-Systran/faster-whisper-tiny.en}
       YOLO_ONNX_URL: ${YOLO_ONNX_URL:-https://huggingface.co/Kalray/yolov8/resolve/main/yolov8n.onnx}
-      CAPTION_ENCODER_URL: ${CAPTION_ENCODER_URL:-https://huggingface.co/Xenova/vit-gpt2-image-captioning/resolve/main/onnx/encoder_model_quantized.onnx}
-      CAPTION_DECODER_URL: ${CAPTION_DECODER_URL:-https://huggingface.co/Xenova/vit-gpt2-image-captioning/resolve/main/onnx/decoder_model_quantized.onnx}
-      CAPTION_TOKENIZER_URL: ${CAPTION_TOKENIZER_URL:-https://huggingface.co/Xenova/vit-gpt2-image-captioning/resolve/main/tokenizer.json}
       CLIP_SECONDS: ${CLIP_SECONDS:-180}
       CLIP_OVERLAP_SECONDS: ${CLIP_OVERLAP_SECONDS:-10}
     volumes:

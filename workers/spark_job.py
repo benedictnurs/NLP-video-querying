@@ -140,13 +140,13 @@ def _process_splice(payload: tuple) -> dict:
     return _cut_and_analyze_clip(payload, models["whisper"], models["detector"])
 
 
-def _cut_and_analyze_clip(payload: tuple, whisper=None, detector=None, captioner=None) -> dict:
+def _cut_and_analyze_clip(payload: tuple, whisper=None, detector=None) -> dict:
     video, index, start_s, end_s = payload
     record = cut_window(video, index, start_s, end_s)
     return _analyze_clip(record, whisper, detector)
 
 
-def _analyze_clip(record: dict, whisper=None, detector=None, captioner=None) -> dict:
+def _analyze_clip(record: dict, whisper=None, detector=None) -> dict:
     from workers.asr import transcribe_wav
     from workers.audio_signals import audio_signals
     from workers.detect import detect_clip_entities
@@ -172,7 +172,6 @@ def _analyze_clip(record: dict, whisper=None, detector=None, captioner=None) -> 
         "asr": os.environ.get("WHISPER_MODEL", "Systran/faster-whisper-tiny.en"),
         "vad": "silero",
         "detector": "yolov8n-onnx-splice",
-        "captioner": "skipped",
         "clothing": "hsv_torso",
         "tagger": "local",
         "audio": "rms_windows",

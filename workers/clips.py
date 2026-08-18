@@ -12,10 +12,6 @@ def clip_folder(video_id: str, clip_id: str) -> Path:
     return path
 
 
-def clip_json_path(video_id: str, clip_id: str) -> Path:
-    return video_work_dir(video_id) / "clips" / clip_id / "clip.json"
-
-
 def clip_analysis_done(video_id: str, clip_id: str) -> bool:
     folder = video_work_dir(video_id) / "clips" / clip_id
     path = folder / "clip.json"

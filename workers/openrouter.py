@@ -7,7 +7,6 @@ import urllib.request
 from pathlib import Path
 
 from workers.clips import load_clip_records, save_clip_record
-from workers.media import extract_jpeg
 from workers.paths import video_work_dir
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -205,100 +204,6 @@ def summarize_clip(record: dict, api_key: str, roster: list[dict] | None = None)
         "event_catalog": "definitions.yaml",
     }
     return record
-
-
-def _events_from_keywords(record: dict) -> list[dict]:
-    events = []
-    for hit in record.get("keyword_hits") or []:
-        events.append(
-            {
-                "definition": hit["definition"],
-                "start_ms": record["start_ms"],
-                "end_ms": record["end_ms"],
-                "confidence": 0.7,
-                "source": "keyword",
-                "evidence": [{"modality": "transcript", "value": hit["phrase"]}],
-            }
-        )
-    return events
-
-
-def _analyze_clip(record: dict, api_key: str) -> list[dict]:
-    frames = _keyframes(record)
-    prompt = (
-        "You analyze police video clips. Return JSON only. "
-        "Describe observable behavior, not intent, guilt, or legal conclusions. "
-        "Use only these candidate definitions: "
-        + ", ".join(record.get("candidate_definitions") or [])
-        + ".\n\n"
-        f"Transcript: {record.get('transcript') or ''}\n"
-        f"Signals: {json.dumps(record.get('signals') or {})}\n"
-        "Schema: {\"events\":[{\"definition\":str,\"start_ms\":int,\"end_ms\":int,"
-        "\"confidence\":float,\"evidence\":[{\"modality\":str,\"value\":str}]}]}"
-    )
-    content = [{"type": "text", "text": prompt}]
-    for frame in frames:
-        content.append(
-            {
-                "type": "image_url",
-                "image_url": {"url": f"data:image/jpeg;base64,{frame}"},
-            }
-        )
-    payload = {
-        "model": os.environ.get("OPENROUTER_MODEL", "google/gemini-2.5-flash-lite"),
-        "messages": [{"role": "user", "content": content}],
-        "temperature": 0,
-        "response_format": {"type": "json_object"},
-    }
-    request = urllib.request.Request(
-        OPENROUTER_URL,
-        data=json.dumps(payload).encode(),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": "http://127.0.0.1:8080",
-            "X-Title": "video-intel",
-        },
-        method="POST",
-    )
-    with urllib.request.urlopen(request, timeout=90) as response:
-        body = json.loads(response.read().decode())
-    text = body["choices"][0]["message"]["content"]
-    parsed = json.loads(text)
-    events = parsed.get("events") or []
-    if not events:
-        return _events_from_keywords(record)
-    return events
-
-
-def _keyframes(record: dict, count: int = 4) -> list[str]:
-    work = Path(record["clip_uri"]).parent / "frames"
-    work.mkdir(exist_ok=True)
-    cells = sorted(path for path in work.glob("cell_*.jpg") if path.exists() and path.stat().st_size > 32)
-    if cells:
-        if len(cells) <= count:
-            chosen = cells
-        else:
-            chosen = [cells[int(round(i * (len(cells) - 1) / (count - 1)))] for i in range(count)]
-        encoded = []
-        for path in chosen:
-            encoded.append(base64.b64encode(path.read_bytes()).decode())
-        return encoded
-    clip = Path(record["clip_uri"])
-    start = record["start_ms"] / 1000.0
-    end = record["end_ms"] / 1000.0
-    duration = max(end - start, 0.1)
-    encoded = []
-    for index in range(count):
-        at_s = (duration * (index + 0.5)) / count
-        dest = work / f"frame_{index}.jpg"
-        try:
-            extract_jpeg(clip, dest, at_s)
-        except RuntimeError:
-            continue
-        if dest.exists():
-            encoded.append(base64.b64encode(dest.read_bytes()).decode())
-    return encoded
 
 
 def _bucket_images(record: dict) -> list[str]:

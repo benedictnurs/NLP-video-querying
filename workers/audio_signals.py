@@ -4,23 +4,6 @@ import wave
 from array import array
 from pathlib import Path
 
-from workers.clips import load_clip_records, save_clip_record, save_video_status
-
-
-def measure_audio_signals(video: dict) -> dict:
-    for record in load_clip_records(video["video_id"]):
-        signals = audio_signals(Path(record["audio_uri"]))
-        record["signals"] = {
-            **(record.get("signals") or {}),
-            **signals,
-            "yelling": signals["loud_speech"],
-        }
-        models = dict(record.get("model") or {})
-        models["audio"] = "rms_windows"
-        record["model"] = models
-        save_clip_record(video["video_id"], record)
-    return save_video_status(video, "audio_measured")
-
 
 def audio_signals(audio_path: Path) -> dict:
     samples, rate = _pcm_samples(audio_path)

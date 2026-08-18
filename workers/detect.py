@@ -9,9 +9,7 @@ from PIL import Image
 
 from workers.annotate import annotate_image, appearance_tag, stamp_clock
 from workers.clock import format_clock
-from workers.clips import load_clip_records, save_clip_record, save_video_status
 from workers.clothing import describe_person_clothing
-from workers.local_tag import attach_local_descriptions
 from workers.paths import models_dir
 from workers.plates import crop_plate_region
 from workers.splice import build_frame_splice, compose_splice
@@ -47,22 +45,6 @@ def load_yolo():
     return _load_yolo()
 
 
-def detect_video_clips(video: dict) -> dict:
-    session = load_yolo()
-    for record in load_clip_records(video["video_id"]):
-        entities = []
-        if session is not None:
-            entities = detect_clip_entities(session, record)
-        models = dict(record.get("model") or {})
-        models["detector"] = _detector_name(session)
-        models["captioner"] = "skipped"
-        record["entities"] = entities
-        attach_local_descriptions(record)
-        record["model"] = models
-        save_clip_record(video["video_id"], record)
-    return save_video_status(video, "detected")
-
-
 def _load_yolo():
     try:
         import onnxruntime as ort
@@ -86,7 +68,7 @@ def _download(url: str, dest: Path) -> None:
     tmp.replace(dest)
 
 
-def detect_clip_entities(session, record: dict, captioner=None) -> list[dict]:
+def detect_clip_entities(session, record: dict) -> list[dict]:
     if session is None:
         record["splice_uri"] = None
         record["tagged_splice_uri"] = None
@@ -110,14 +92,7 @@ def detect_clip_entities(session, record: dict, captioner=None) -> list[dict]:
     return entities
 
 
-def _detector_name(session) -> str:
-    if session is None:
-        return "unavailable"
-    name = Path(YOLO_URL.split("?", 1)[0]).stem or "yolov8n"
-    return f"{name}-onnx"
-
-
-def _detect_clip(session, record: dict, captioner=None) -> tuple[list[dict], dict]:
+def _detect_clip(session, record: dict) -> tuple[list[dict], dict]:
     clip = Path(record["clip_uri"])
     start_s = record["start_ms"] / 1000.0
     end_s = record["end_ms"] / 1000.0

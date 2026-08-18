@@ -43,7 +43,7 @@ def ingest_videos():
 
     @task(max_active_tis_per_dag=1)
     def spark_process_clips(video: dict) -> dict:
-        """One Spark worker per splice: cut, whisper, YOLO nano, splice. No captioner."""
+        """One Spark worker per splice: cut, whisper, YOLO nano, splice."""
         from workers.spark_job import process_video_on_spark
 
         return process_video_on_spark(video)

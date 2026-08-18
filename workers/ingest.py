@@ -168,10 +168,6 @@ def content_fingerprint(path: Path, size: int) -> str:
     return digest.hexdigest()
 
 
-def fingerprint_for(path: Path, size: int, mtime: float | None = None) -> str:
-    return content_fingerprint(path, size)
-
-
 def load_registry() -> dict:
     path = registry_path()
     if not path.exists():

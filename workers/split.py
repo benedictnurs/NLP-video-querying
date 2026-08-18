@@ -1,35 +1,13 @@
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 
 from workers.media import cut_audio, cut_processing_clip
 from workers.clips import clip_folder
-from workers.paths import video_work_dir
 
 CLIP_SECONDS = float(os.environ.get("CLIP_SECONDS", "180"))
 OVERLAP_SECONDS = float(os.environ.get("CLIP_OVERLAP_SECONDS", "10"))
-
-
-def split_video(video: dict) -> dict:
-    duration_s = float(video.get("duration_s") or 0)
-    if duration_s <= 0:
-        raise ValueError(f"No duration for {video['video_id']}")
-
-    work_dir = video_work_dir(video["video_id"])
-    clips_dir = work_dir / "clips"
-    clips_dir.mkdir(parents=True, exist_ok=True)
-
-    clips = [cut_window(video, index, start_s, end_s) for index, (start_s, end_s) in enumerate(clip_windows(duration_s))]
-    video = {
-        **video,
-        "clips_dir": str(clips_dir),
-        "clip_count": len(clips),
-        "status": "split",
-    }
-    (work_dir / "ingest.json").write_text(json.dumps(video, indent=2) + "\n")
-    return video
 
 
 def cut_window(video: dict, index: int, start_s: float, end_s: float) -> dict:

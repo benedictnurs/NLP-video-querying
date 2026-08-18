@@ -72,30 +72,6 @@ def extract_audio(source: Path, dest: Path) -> None:
 PROCESSING_VF = "scale='min(854,iw)':-2,fps=5"
 
 
-def make_processing_copy(source: Path, dest: Path) -> None:
-    run_ffmpeg(
-        [
-            "-y",
-            "-i",
-            str(source),
-            "-vf",
-            PROCESSING_VF,
-            "-c:v",
-            "libx264",
-            "-preset",
-            "ultrafast",
-            "-crf",
-            "28",
-            "-an",
-            str(dest),
-        ]
-    )
-
-
-def cut_clip(source: Path, dest: Path, start_s: float, duration_s: float) -> None:
-    cut_processing_clip(source, dest, start_s, duration_s, already_processed=True)
-
-
 def cut_processing_clip(
     source: Path,
     dest: Path,

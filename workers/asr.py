@@ -3,30 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from workers.clips import load_clip_records, save_clip_record, save_video_status
-from workers.metadata import keyword_hits, repeated_commands
 from workers.paths import models_dir
-
-
-def transcribe_video_clips(video: dict) -> dict:
-    model = load_whisper()
-    asr_name = os.environ.get("WHISPER_MODEL", "Systran/faster-whisper-tiny.en")
-    for record in load_clip_records(video["video_id"]):
-        transcript, segments, error = transcribe_wav(model, Path(record["audio_uri"]))
-        models = dict(record.get("model") or {})
-        models.update({"asr": f"faster-whisper/{asr_name}", "vad": "silero"})
-        record["transcript"] = transcript
-        record["transcript_segments"] = segments
-        if error:
-            record["asr_error"] = error
-        record["keyword_hits"] = keyword_hits(transcript)
-        record["signals"] = {
-            **(record.get("signals") or {}),
-            "repeated_commands": repeated_commands(transcript),
-        }
-        record["model"] = models
-        save_clip_record(video["video_id"], record)
-    return save_video_status(video, "transcribed")
 
 
 def load_whisper():
