@@ -1,4 +1,4 @@
-# Code Four — NLP video querying
+NLP For Body Camera Querying
 
 Investigative index for police bodycam and dashcam. Drop a file in `videos/`, Airflow runs it through speech, objects, event buckets, and identity matching, then writes a Neo4j graph. Codex (or Cursor) searches that graph through the **Code Four** MCP: events, people, vehicles, plates, and scene images.
 
