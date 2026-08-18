@@ -85,7 +85,7 @@ def summarize_clip(record: dict, api_key: str, roster: list[dict] | None = None)
         f"Proposed timed events from the quick scan (keep or correct clocks): {json.dumps(proposed)}\n"
         f"{night_bit}"
         "Look at the attached labeled splice (a grid of timestamped frames). "
-        "If extra crops are attached, they are key-event closeups (torso or a loud/arrest frame). "
+        "If extra crops are attached, they are unlabeled person or plate closeups. "
         "Detector labels can be wrong; ignore boats, trains, or watercraft if the scene is a road, "
         "parking lot, or sidewalk.\n"
         "Create Person, Vehicle, and Event records for this clip.\n"
@@ -251,11 +251,6 @@ def _public_entities(record: dict) -> list[dict]:
                     "id": item.get("id"),
                     "type": "person",
                     "label": item.get("label") or "person",
-                    "clothes": item.get("clothes")
-                    or item.get("clothing")
-                    or item.get("upper_clothing_color")
-                    or item.get("image_tag"),
-                    "is_cop_hint": item.get("uniform_like"),
                 }
             )
         elif kind == "vehicle":
@@ -264,7 +259,7 @@ def _public_entities(record: dict) -> list[dict]:
                     "id": item.get("id"),
                     "type": "vehicle",
                     "label": item.get("label"),
-                    "color": item.get("color") or item.get("upper_clothing_color"),
+                    "color": item.get("color"),
                     "plate": item.get("plate"),
                 }
             )

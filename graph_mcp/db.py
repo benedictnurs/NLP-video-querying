@@ -56,6 +56,20 @@ def run_cypher(cypher: str, params: dict | None = None, limit: int = 100) -> lis
         return rows
 
 
+def run_write(cypher: str, params: dict | None = None) -> dict:
+    with driver().session() as session:
+        result = session.run(cypher, **(params or {}))
+        summary = result.consume()
+        counters = summary.counters
+        return {
+            "nodes_created": counters.nodes_created,
+            "nodes_deleted": counters.nodes_deleted,
+            "properties_set": counters.properties_set,
+            "relationships_created": counters.relationships_created,
+            "relationships_deleted": counters.relationships_deleted,
+        }
+
+
 def to_json(value):
     if value is None or isinstance(value, (str, int, float, bool)):
         return value

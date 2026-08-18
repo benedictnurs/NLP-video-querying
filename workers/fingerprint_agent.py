@@ -360,7 +360,7 @@ def _clip_entities(record: dict) -> list[dict]:
                     "gender": item.get("gender"),
                     "hair": item.get("hair"),
                     "glasses": item.get("glasses"),
-                    "clothes": item.get("clothes") or item.get("upper_clothing_color"),
+                    "clothes": item.get("clothes"),
                     "description": item.get("description"),
                     "is_cop": item.get("is_cop"),
                 }

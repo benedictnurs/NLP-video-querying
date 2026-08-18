@@ -13,6 +13,7 @@ from fastmcp import FastMCP
 from fastmcp.utilities.types import Image
 
 from graph_mcp.blocks import assemble, catalog, parse_pipeline, public_params, recipe_steps
+from graph_mcp.correct import apply_correction
 from graph_mcp.db import dumps, load_env, run_cypher
 from graph_mcp.queries import (
     clock_seconds,
@@ -56,6 +57,8 @@ mcp = FastMCP(
         "Compose queries from blocks: list_query_blocks, then preview_blocks or run_blocks. "
         "Use run_recipe for named pipelines (all_dui, all_miranda, suspects). "
         "Use analyze_scene to pull splice/frame images into Codex for visual analysis. "
+        "Do not write to Neo4j after analyzing a scene. "
+        "correct_graph is the only content write: call it ONLY when the user asked to change the graph or corrected a fact. Preview first (confirmed=false), then confirmed=true. "
         "Use open_in_finder / open_clip_attachment to reveal the same files in Finder. "
         "Use run_custom_cypher only for gaps. potential_suspect is a scene role, not a charge."
     ),
@@ -524,7 +527,7 @@ def analyze_scene(
             pass
     note = dumps(
         {
-            "instruction": "Analyze the attached scene image(s). tagged_splice is a YOLO-labeled grid of frames from this clip. Report observable facts only: who is present, clothes, vehicles, objects, officer vs civilian. Not a charge.",
+            "instruction": "Analyze the attached scene image(s). tagged_splice is a YOLO-labeled grid of frames from this clip. Report observable facts only: who is present, clothes, vehicles, objects, officer vs civilian. Not a charge. Do not call correct_graph unless the user asked to change the graph or corrected a fact.",
             "video_id": row.get("video_id"),
             "clip": row.get("clip"),
             "start_timestamp": row.get("start_timestamp"),
@@ -538,6 +541,85 @@ def analyze_scene(
     payload: list = [note]
     payload.extend(Image(path=path) for path in images)
     return payload
+
+
+@mcp.tool
+def correct_graph(
+    user_request: str,
+    kind: str,
+    confirmed: bool = False,
+    id: str = "",
+    video_id: str = "",
+    start_timestamp: str = "",
+    event_type: str = "",
+    involves_person: str = "",
+    involves_role: str = "",
+    clothes: str = "",
+    role: str = "",
+    is_cop: bool | None = None,
+    potential_suspect: bool | None = None,
+    description: str = "",
+    hair: str = "",
+    glasses: str = "",
+    race: str = "",
+    gender: str = "",
+    distinctive: str = "",
+    shoes: str = "",
+    bag: str = "",
+    color: str = "",
+    plate: str = "",
+    analysis: str = "",
+    summary: str = "",
+    new_type: str = "",
+    new_start_timestamp: str = "",
+    end_timestamp: str = "",
+    label: str = "",
+    suspect_reason: str = "",
+) -> str:
+    """Write a user correction to Neo4j. NEVER call this after analyzing a scene on your own. Call ONLY when the user asked to change the graph or corrected a fact (wrong clothes, not a cop, event type, clock, plate). user_request must quote their words. confirmed=false previews; confirmed=true writes. kind=person|vehicle|event|object|plate|clip. id is person_3 or video_1:person_3. For events pass event_type + start_timestamp. involves_role updates Event-INVOLVES-Person."""
+    blocked = _require_primer()
+    if blocked:
+        return blocked
+    changes = {
+        "clothes": clothes,
+        "role": role,
+        "description": description,
+        "hair": hair,
+        "glasses": glasses,
+        "race": race,
+        "gender": gender,
+        "distinctive": distinctive,
+        "shoes": shoes,
+        "bag": bag,
+        "color": color,
+        "plate": plate,
+        "analysis": analysis,
+        "summary": summary,
+        "type": new_type,
+        "start_timestamp": new_start_timestamp,
+        "end_timestamp": end_timestamp,
+        "label": label,
+        "suspect_reason": suspect_reason,
+        "is_cop": is_cop,
+        "potential_suspect": potential_suspect,
+    }
+    try:
+        return dumps(
+            apply_correction(
+                user_request=user_request,
+                kind=kind,
+                confirmed=confirmed,
+                node_id=id,
+                video_id=video_id,
+                start_timestamp=start_timestamp,
+                event_type=event_type,
+                involves_person=involves_person,
+                involves_role=involves_role,
+                changes=changes,
+            )
+        )
+    except Exception as exc:
+        return dumps({"error": str(exc)})
 
 
 @mcp.tool
@@ -564,7 +646,7 @@ def run_custom_cypher(cypher: str, limit: int = 50) -> str:
     if _WRITE.search(text):
         return dumps(
             {
-                "error": "Custom queries are read-only. Use MATCH/OPTIONAL MATCH/WITH/RETURN. No CREATE, MERGE, DELETE, SET, or DROP.",
+                "error": "Custom queries are read-only. Use MATCH/OPTIONAL MATCH/WITH/RETURN. To change the graph after a user ask or correction, use correct_graph. No CREATE, MERGE, DELETE, SET, or DROP here.",
             }
         )
     if ";" in text:

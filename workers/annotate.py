@@ -11,13 +11,10 @@ TEXT_BG = (0, 0, 0)
 
 
 def appearance_tag(item: dict) -> str:
+    if item.get("type") == "person":
+        return "person"
     if item.get("image_tag"):
         return str(item["image_tag"]).strip()
-    if item.get("type") == "person":
-        color = item.get("upper_clothing_color")
-        if color and color != "unknown":
-            return f"{color} shirt person"
-        return "person"
     return item.get("label") or item.get("type") or "object"
 
 

@@ -11,7 +11,7 @@ This is a scene index, not a charging system. `potential_suspect` is who the off
 | Orchestration | Apache Airflow (`ingest_videos` DAG), Docker Compose |
 | Clip workers | Apache Spark, ffmpeg |
 | Speech | Faster-Whisper `tiny.en` |
-| Detection | YOLOv8n (ONNX), HSV clothing |
+| Detection | YOLOv8n (ONNX) |
 | Event catalog | `definitions.yaml` (ids, aliases, transcript phrases, topics) |
 | Vision / NLP | Gemini via OpenRouter — Flash Lite for scan/enrich, Gemini 3.5 Flash for identity |
 | Identity | LangGraph fingerprint agent across clips |
@@ -55,7 +55,7 @@ Graphed files are cached (`data/videos/<stem>/` plus `data/registry.json`). Addi
 Manual DAG. `max_active_runs=1`. Each run takes the **next** ungraphed file in `videos/` (sorted by name), runs the stages below end to end, then queues another run if more files remain. Unrelated videos never share a batch.
 
 1. **`ingest_video`** — Copy into `data/videos/<video_id>/`, ffprobe. `video_id` is the filename stem (`video_4.mp4` → `video_4`).
-2. **`spark_process_clips`** — Cut ~180s clips with overlap. Whisper transcript, YOLOv8n boxes, clothing color, frame grid (`splice.jpg` / tagged splice). YAML `transcript_any` phrases become `keyword_hits`.
+2. **`spark_process_clips`** — Cut ~180s clips with overlap. Whisper transcript, YOLOv8n boxes (person / vehicle / object), frame grid (`splice.jpg` / tagged splice). YAML `transcript_any` phrases become `keyword_hits`.
 3. **`score_clips`** — Audio signals plus `definitions.yaml` rules → `candidate_definitions` and local events.
 4. **`scan_events_vlm`** — Gemini Flash Lite sees the splice and the YAML catalog (`catalog_for_prompt`). It must bucket the clip into catalog ids (`traffic_stop`, `miranda_warning`, …) with `start_timestamp` clocks like `01:56`.
 5. **`analyze_important_openrouter`** — Gemini enrich: people, vehicles, clip summary. **Agentic catalog:** it may `updated_definitions` (aliases/phrases on an existing id) or `new_definitions` only when nothing fits. Those write back to the YAML / learned file.
@@ -103,6 +103,8 @@ run_blocks("events | topic query=dui | timeframe start=01:00 end=20:00 | with_pe
 ```
 
 `list_query_blocks` is the catalog. Shortcuts (`find_events`, `find_people`, `events_in_timeframe`, …) are the same recipes. `run_custom_cypher` is read-only MATCH/RETURN.
+
+**Corrections.** `correct_graph` writes Neo4j only when the user asked or corrected a fact (`user_request` quotes them, `confirmed=true`). Preview with `confirmed=false`. Do not update the graph after a scene analysis on your own.
 
 **Media.** Graph URIs point at local `data/videos/...`.
 

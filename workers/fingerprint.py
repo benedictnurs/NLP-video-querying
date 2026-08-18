@@ -87,8 +87,10 @@ def denoise_clip(record: dict, scene: dict | None = None) -> dict:
         kind = item.get("type")
         conf = float(item.get("confidence") or 0)
         item.pop("caption", None)
-        if item.get("clothing_source") == "caption":
-            item["clothing_source"] = "hsv"
+        item.pop("upper_clothing_color", None)
+        item.pop("clothing_confidence", None)
+        item.pop("clothing_source", None)
+        item.pop("uniform_like", None)
         if scene.get("land") and label in RARE_ON_ROAD | WATER_LABELS:
             continue
         if kind == "object" and conf < 0.45:

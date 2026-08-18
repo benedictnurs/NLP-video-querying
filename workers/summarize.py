@@ -29,13 +29,6 @@ def local_tags(record: dict) -> list[str]:
         label = entity.get("label")
         if label and label not in tags:
             tags.append(label)
-        color = entity.get("upper_clothing_color")
-        if entity.get("type") == "person" and color and color != "unknown":
-            color_tag = f"clothing_{color}"
-            if color_tag not in tags:
-                tags.append(color_tag)
-        if entity.get("uniform_like") and "uniform_like" not in tags:
-            tags.append("uniform_like")
     signals = record.get("signals") or {}
     if (signals.get("loud_impact") or 0) >= 0.5:
         tags.append("loud_impact")

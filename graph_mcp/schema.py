@@ -13,6 +13,8 @@ How to use this MCP (Code Four)
 4. Shortcut tools (find_events, events_in_timeframe, find_people, ...) still work; they are the same recipes.
 5. To view AND analyze footage: analyze_scene(clip="clip_0009") returns the tagged splice.jpg (and optional frames) as images for Codex, and opens Finder. open_in_finder / open_clip_attachment only reveal the file. Graph media URIs are local data/ paths (rewrite_media_paths if you still see /opt/airflow/data).
 6. Use run_custom_cypher only when no block combination fits. Read-only MATCH/RETURN only.
+7. Do not write to the graph after analyzing a scene. Query and describe only.
+8. correct_graph is the only content write. Call it ONLY when the user asked to change the graph or corrected a fact. Quote them in user_request. confirmed=false previews; confirmed=true applies. Never "fix" clothes, roles, or event types on your own.
 
 Videos
 - Drop files in videos/. Each file is cached after it is graphed (video_1.mp4 -> video_1).

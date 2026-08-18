@@ -172,7 +172,6 @@ def _analyze_clip(record: dict, whisper=None, detector=None) -> dict:
         "asr": os.environ.get("WHISPER_MODEL", "Systran/faster-whisper-tiny.en"),
         "vad": "silero",
         "detector": "yolov8n-onnx-splice",
-        "clothing": "hsv_torso",
         "tagger": "local",
         "audio": "rms_windows",
         "engine": "spark",

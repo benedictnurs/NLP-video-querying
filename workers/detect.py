@@ -9,7 +9,6 @@ from PIL import Image
 
 from workers.annotate import annotate_image, appearance_tag, stamp_clock
 from workers.clock import format_clock
-from workers.clothing import describe_person_clothing
 from workers.paths import models_dir
 from workers.plates import crop_plate_region
 from workers.splice import build_frame_splice, compose_splice
@@ -124,10 +123,9 @@ def _detect_clip(session, record: dict) -> tuple[list[dict], dict]:
             cell_hits.append(item)
         if cell.get("night"):
             night_cells += 1
-        _stamp_clothing(cell_hits)
         detections_by_cell.append(cell_hits)
     record["night"] = night_cells >= max(1, len(splice.get("cells") or []) // 2)
-    entities = _with_clothing(_clip_inventory(detections_by_cell), clothing_dir)
+    entities = _with_person_crops(_clip_inventory(detections_by_cell), clothing_dir)
     _with_plate_crops(entities, clothing_dir)
     _stamp_image_tags(entities)
     for hits in detections_by_cell:
@@ -259,38 +257,37 @@ def _clip_inventory(detections_by_cell: list[list[dict]]) -> list[dict]:
     return combined
 
 
-def _with_clothing(detections: list[dict], frame_dir: Path) -> list[dict]:
+def _with_person_crops(detections: list[dict], dest_dir: Path) -> list[dict]:
     for item in detections:
-        if item["type"] != "person":
+        if item.get("type") != "person":
             continue
         frame = Path(item.get("frame_uri") or "")
         if not frame.exists():
-            item.update(_unknown_clothing())
             continue
-        crop = frame_dir / f"{item['id']}_torso.jpg"
-        item.update(describe_person_clothing(frame, item["box"], crop))
+        crop = _crop_box(frame, item.get("box") or [])
+        if crop is None:
+            continue
+        dest = dest_dir / f"{item['id']}.jpg"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        crop.save(dest, quality=95)
+        item["crop_uri"] = str(dest)
     return detections
 
 
-def _stamp_clothing(hits: list[dict]) -> None:
-    for item in hits:
-        if item.get("type") != "person" or item.get("upper_clothing_color"):
-            continue
-        frame = Path(item.get("frame_uri") or "")
-        if not frame.exists():
-            item.update(_unknown_clothing())
-            continue
-        item.update(describe_person_clothing(frame, item["box"]))
-
-
-def _unknown_clothing() -> dict:
-    return {
-        "upper_clothing_color": "unknown",
-        "clothing_confidence": 0.0,
-        "clothing_source": "hsv",
-        "needs_vision": True,
-        "uniform_like": False,
-    }
+def _crop_box(image_path: Path, box: list[int]) -> Image.Image | None:
+    if len(box) != 4:
+        return None
+    try:
+        image = Image.open(image_path).convert("RGB")
+    except OSError:
+        return None
+    x1, y1, x2, y2 = [int(v) for v in box]
+    width, height = image.size
+    x1, x2 = max(0, x1), min(width, x2)
+    y1, y2 = max(0, y1), min(height, y2)
+    if x2 - x1 < 20 or y2 - y1 < 20:
+        return None
+    return image.crop((x1, y1, x2, y2))
 
 
 def _with_plate_crops(detections: list[dict], dest_dir: Path) -> list[dict]:
