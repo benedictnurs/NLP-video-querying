@@ -13,7 +13,7 @@ from fastmcp import FastMCP
 from fastmcp.utilities.types import Image
 
 from graph_mcp.blocks import assemble, catalog, parse_pipeline, public_params, recipe_steps
-from graph_mcp.correct import apply_correction
+from graph_mcp.correct import apply_correction, apply_link, apply_merge
 from graph_mcp.db import dumps, load_env, run_cypher
 from graph_mcp.queries import (
     clock_seconds,
@@ -58,7 +58,7 @@ mcp = FastMCP(
         "Use run_recipe for named pipelines (all_dui, all_miranda, suspects). "
         "Use analyze_scene to pull splice/frame images into Codex for visual analysis. "
         "Do not write to Neo4j after analyzing a scene. "
-        "correct_graph is the only content write: call it ONLY when the user asked to change the graph or corrected a fact. Preview first (confirmed=false), then confirmed=true. "
+        "correct_graph / link_graph / merge_graph write ONLY when the user asked to change the graph or corrected a fact. Preview first (confirmed=false), then confirmed=true. action=create adds Person/Vehicle/Event/Object/Plate. link_graph adds INVOLVES/CONTAINS/CONTINUES/HAS_*. merge_graph dedupes two Person/Vehicle/Object/Plate ids into one canonical keep_id and deletes drop_id. Never write after analyzing a scene on your own. "
         "Use open_in_finder / open_clip_attachment to reveal the same files in Finder. "
         "Use run_custom_cypher only for gaps. potential_suspect is a scene role, not a charge."
     ),
@@ -548,12 +548,17 @@ def correct_graph(
     user_request: str,
     kind: str,
     confirmed: bool = False,
+    action: str = "update",
     id: str = "",
     video_id: str = "",
+    clip: str = "",
     start_timestamp: str = "",
     event_type: str = "",
     involves_person: str = "",
     involves_role: str = "",
+    involves_vehicle: str = "",
+    involves_object: str = "",
+    continues_from: str = "",
     clothes: str = "",
     role: str = "",
     is_cop: bool | None = None,
@@ -576,7 +581,7 @@ def correct_graph(
     label: str = "",
     suspect_reason: str = "",
 ) -> str:
-    """Write a user correction to Neo4j. NEVER call this after analyzing a scene on your own. Call ONLY when the user asked to change the graph or corrected a fact (wrong clothes, not a cop, event type, clock, plate). user_request must quote their words. confirmed=false previews; confirmed=true writes. kind=person|vehicle|event|object|plate|clip. id is person_3 or video_1:person_3. For events pass event_type + start_timestamp. involves_role updates Event-INVOLVES-Person."""
+    """Write a user correction to Neo4j. NEVER call after analyzing a scene on your own. ONLY when the user asked to change the graph or corrected a fact. user_request quotes them. confirmed=false previews; confirmed=true writes. action=update patches an existing node. action=create adds Person/Vehicle/Event/Object/Plate (not Video/Clip) and links it to the video/clip. kind=person|vehicle|event|object|plate|clip. For events pass event_type + start_timestamp and clip. involves_* / continues_from add relations. Use link_graph for a relation between two existing nodes. Use merge_graph to collapse two person/vehicle ids into one."""
     blocked = _require_primer()
     if blocked:
         return blocked
@@ -609,12 +614,110 @@ def correct_graph(
                 user_request=user_request,
                 kind=kind,
                 confirmed=confirmed,
+                action=action,
                 node_id=id,
                 video_id=video_id,
+                clip=clip,
                 start_timestamp=start_timestamp,
                 event_type=event_type,
                 involves_person=involves_person,
                 involves_role=involves_role,
+                involves_vehicle=involves_vehicle,
+                involves_object=involves_object,
+                continues_from=continues_from,
+                changes=changes,
+            )
+        )
+    except Exception as exc:
+        return dumps({"error": str(exc)})
+
+
+@mcp.tool
+def link_graph(
+    user_request: str,
+    rel: str,
+    from_kind: str,
+    from_id: str,
+    to_kind: str,
+    to_id: str,
+    confirmed: bool = False,
+    video_id: str = "",
+    role: str = "",
+) -> str:
+    """Create a relationship between two existing nodes. ONLY when the user asked or corrected. confirmed=false previews; confirmed=true writes. rel=INVOLVES|CONTAINS|CONTINUES|HAS_PERSON|HAS_VEHICLE|HAS_OBJECT|HAS_PLATE|INSTANCE_OF. Examples: Event INVOLVES Person (role=potential_suspect), Clip CONTAINS Person, Event CONTINUES Event, Vehicle HAS_PLATE Plate. Does not create Video or Clip nodes."""
+    blocked = _require_primer()
+    if blocked:
+        return blocked
+    try:
+        return dumps(
+            apply_link(
+                user_request=user_request,
+                confirmed=confirmed,
+                rel=rel,
+                from_kind=from_kind,
+                from_id=from_id,
+                to_kind=to_kind,
+                to_id=to_id,
+                video_id=video_id,
+                role=role,
+            )
+        )
+    except Exception as exc:
+        return dumps({"error": str(exc)})
+
+
+@mcp.tool
+def merge_graph(
+    user_request: str,
+    keep_id: str,
+    drop_id: str,
+    kind: str = "person",
+    confirmed: bool = False,
+    video_id: str = "",
+    clothes: str = "",
+    role: str = "",
+    is_cop: bool | None = None,
+    potential_suspect: bool | None = None,
+    description: str = "",
+    hair: str = "",
+    glasses: str = "",
+    race: str = "",
+    gender: str = "",
+    distinctive: str = "",
+    color: str = "",
+    plate: str = "",
+    analysis: str = "",
+    label: str = "",
+) -> str:
+    """Dedupe two identity nodes into one. ONLY when the user said they are the same person/car/object. keep_id is the canonical id that remains (person_3). drop_id is deleted after its Event INVOLVES, Clip CONTAINS, and Video HAS_* rels move onto keep. Fills blank keep fields from drop. kind=person|vehicle|object|plate. confirmed=false previews; confirmed=true writes. Does not merge across videos."""
+    blocked = _require_primer()
+    if blocked:
+        return blocked
+    changes = {
+        "clothes": clothes,
+        "role": role,
+        "description": description,
+        "hair": hair,
+        "glasses": glasses,
+        "race": race,
+        "gender": gender,
+        "distinctive": distinctive,
+        "color": color,
+        "plate": plate,
+        "analysis": analysis,
+        "label": label,
+        "is_cop": is_cop,
+        "potential_suspect": potential_suspect,
+    }
+    try:
+        return dumps(
+            apply_merge(
+                user_request=user_request,
+                confirmed=confirmed,
+                kind=kind,
+                keep_id=keep_id,
+                drop_id=drop_id,
+                video_id=video_id,
                 changes=changes,
             )
         )
@@ -646,7 +749,7 @@ def run_custom_cypher(cypher: str, limit: int = 50) -> str:
     if _WRITE.search(text):
         return dumps(
             {
-                "error": "Custom queries are read-only. Use MATCH/OPTIONAL MATCH/WITH/RETURN. To change the graph after a user ask or correction, use correct_graph. No CREATE, MERGE, DELETE, SET, or DROP here.",
+                "error": "Custom queries are read-only. Use MATCH/OPTIONAL MATCH/WITH/RETURN. To change the graph after a user ask or correction, use correct_graph (update/create), link_graph, or merge_graph (dedupe). No CREATE, MERGE, DELETE, SET, or DROP here.",
             }
         )
     if ";" in text:

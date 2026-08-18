@@ -70,6 +70,30 @@ def run_write(cypher: str, params: dict | None = None) -> dict:
         }
 
 
+def run_writes(statements: list[tuple[str, dict]]) -> dict:
+    totals = {
+        "nodes_created": 0,
+        "nodes_deleted": 0,
+        "properties_set": 0,
+        "relationships_created": 0,
+        "relationships_deleted": 0,
+        "statements": 0,
+    }
+    with driver().session() as session:
+        with session.begin_transaction() as tx:
+            for cypher, params in statements:
+                result = tx.run(cypher, **(params or {}))
+                counters = result.consume().counters
+                totals["nodes_created"] += counters.nodes_created
+                totals["nodes_deleted"] += counters.nodes_deleted
+                totals["properties_set"] += counters.properties_set
+                totals["relationships_created"] += counters.relationships_created
+                totals["relationships_deleted"] += counters.relationships_deleted
+                totals["statements"] += 1
+            tx.commit()
+    return totals
+
+
 def to_json(value):
     if value is None or isinstance(value, (str, int, float, bool)):
         return value

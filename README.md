@@ -1,8 +1,106 @@
 ## NLP For Body Camera Querying
 
-Investigative index for police bodycam and dashcam. Drop a file in `videos/`, Airflow runs it through speech, objects, event buckets, and identity matching, then writes a Neo4j graph. Codex (or Cursor) searches that graph through the **Code Four** MCP: events, people, vehicles, plates, and scene images.
+Investigative index for police bodycam and dashcam. Drop a file in `videos/`, Docker runs it through speech, objects, event buckets, and identity matching, then writes a Neo4j graph. Codex or Cursor searches that graph through the **Code Four** MCP: events, people, vehicles, plates, and scene images.
 
 This is a scene index, not a charging system. `potential_suspect` is who the officer is stopping or questioning. `is_cop` is uniform appearance only. Event ids (`traffic_stop`, `miranda_warning`, `field_sobriety_test`) are observable labels, not charges.
+
+## How to use
+
+1. Put a file in `videos/` (for example `video_4.mp4`). Wait a few seconds after the copy finishes so the file is stable.
+2. Start Docker (see [Setup](#setup)). Trigger **ingest_videos** in Airflow. One ungraphed file runs end to end, then the next file in `videos/` is queued. Already-graphed files are skipped.
+3. Watch the run at [http://127.0.0.1:8080](http://127.0.0.1:8080) (`airflow` / `airflow`). When status is graphed, the video is in Neo4j.
+4. Run the setup script in /scripts to install the MCP in Codex.
+5. In Codex or Cursor, ask Code Four MCP. Then search anything using natural language:
+
+Local UIs after Docker is up:
+
+- Airflow: [http://127.0.0.1:8080](http://127.0.0.1:8080) (`airflow` / `airflow`)
+- Neo4j Browser: [http://127.0.0.1:7474/browser/](http://127.0.0.1:7474/browser/) (`neo4j` / password from `.env`)
+
+## Setup
+
+Need Docker Desktop (or another Compose runtime), Python 3.12+, and an [OpenRouter](https://openrouter.ai/) key for Gemini. Do not commit `.env`.
+
+### Docker (ingest + Neo4j)
+
+This stack is Airflow, Spark, Postgres, and Neo4j. The MCP process runs on the host and talks to Neo4j at `bolt://127.0.0.1:7687`. Airflow inside Compose uses `bolt://neo4j:7687`.
+
+```bash
+cd "/path/to/NLP video querying"
+
+cp .env.example .env
+mkdir -p videos data
+
+python3 -c "import base64,os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())"
+```
+
+Put that Fernet string in `.env` as `AIRFLOW__CORE__FERNET_KEY`. Set `NEO4J_PASSWORD` (must match what you use in Neo4j Browser) and `OPENROUTER_API_KEY`. Leave `NEO4J_URI=bolt://127.0.0.1:7687` for host tools.
+
+First start (builds the Airflow image; later starts are faster):
+
+```bash
+docker compose up -d --build
+```
+
+Wait until the Airflow UI answers. Then either drop files in `videos/` and trigger the DAG from the UI, or:
+
+```bash
+docker compose exec airflow-scheduler airflow dags trigger ingest_videos
+```
+
+Useful checks:
+
+```bash
+docker compose ps
+docker compose logs -f airflow-scheduler
+```
+
+Stop without deleting volumes: `docker compose down`.
+
+### MCP (Code Four)
+
+The graph server is stdio FastMCP in `graph_mcp/`. It needs the venv and a running Neo4j from Docker.
+
+**Codex** (creates `.venv`, installs deps, writes `~/.codex/config.toml` as server `code-four`):
+
+```bash
+./scripts/install_codex_mcp.sh
+```
+
+Restart Codex after install. Optional: `./scripts/install_codex_mcp.sh --codex-allow-all` so Codex does not prompt on every tool.
+
+**Manual venv** (Cursor, or if you skipped the installer):
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements-mcp.txt
+chmod +x run_mcp.sh
+./run_mcp.sh
+```
+
+`./run_mcp.sh` is the stdio entrypoint. You do not leave it running in a terminal for Codex/Cursor; the client starts it.
+
+**Cursor** — repo-local `.cursor/mcp.json` (gitignored). Point command at this repo’s venv:
+
+```json
+{
+  "mcpServers": {
+    "code-four": {
+      "command": "/ABS/PATH/TO/NLP video querying/.venv/bin/python",
+      "args": ["-m", "graph_mcp"],
+      "cwd": "/ABS/PATH/TO/NLP video querying",
+      "env": {
+        "PYTHONPATH": "/ABS/PATH/TO/NLP video querying",
+        "NEO4J_URI": "bolt://127.0.0.1:7687",
+        "DEFINITIONS_PATH": "/ABS/PATH/TO/NLP video querying/definitions.yaml",
+        "DATA_DIR": "/ABS/PATH/TO/NLP video querying/data"
+      }
+    }
+  }
+}
+```
+
+Restart Cursor after saving. If graph URIs still look like `/opt/airflow/data/...`, call `rewrite_media_paths` once so they map to local `data/`.
 
 ## Stack
 
@@ -17,11 +115,6 @@ This is a scene index, not a charging system. `potential_suspect` is who the off
 | Identity | LangGraph fingerprint agent across clips |
 | Graph | Neo4j 5 |
 | Query | FastMCP stdio server (`graph_mcp`), Cypher query blocks |
-
-Local services after `docker compose up -d`:
-
-- Airflow UI: [http://127.0.0.1:8080](http://127.0.0.1:8080) (`airflow` / `airflow`)
-- Neo4j Browser: [http://127.0.0.1:7474/browser/](http://127.0.0.1:7474/browser/) (`neo4j` / password from `.env`)
 
 ## High-level flow
 
@@ -90,53 +183,7 @@ Relationships include `(Clip)-[:CONTAINS]->(Event)`, `(Event)-[:INVOLVES {role}]
 
 Clocks on the graph are seekable `MM:SS` (and `seek_s`), not milliseconds.
 
-## MCP (Code Four)
-
-Package: `graph_mcp`. Stdio FastMCP. Neo4j on `bolt://127.0.0.1:7687`. Primer first: `explain_graph_context`.
-
-**Query.** Prefer composable blocks over raw Cypher:
-
-```text
-run_recipe("all_dui")
-run_recipe("all_miranda")
-run_blocks("events | topic query=dui | timeframe start=01:00 end=20:00 | with_people | with_clip | return_events")
-```
-
-`list_query_blocks` is the catalog. Shortcuts (`find_events`, `find_people`, `events_in_timeframe`, …) are the same recipes. `run_custom_cypher` is read-only MATCH/RETURN.
-
-**Corrections.** `correct_graph` writes Neo4j only when the user asked or corrected a fact (`user_request` quotes them, `confirmed=true`). Preview with `confirmed=false`. Do not update the graph after a scene analysis on your own.
-
-**Media.** Graph URIs point at local `data/videos/...`.
-
-- `analyze_scene(clip="clip_0009")` — sends tagged splice.jpg (optional frame cells) to the model and reveals Finder
-- `open_clip_attachment` / `open_in_finder` — open the file only
-
-### Run the MCP
-
-```bash
-./run_mcp.sh
-# or
-./scripts/install_codex_mcp.sh
-```
-
-Cursor: `.cursor/mcp.json` (gitignored). Codex: `~/.codex/config.toml` server `code-four`. Restart the client after install.
-
-```bash
-python3 -m venv .venv
-.venv/bin/pip install -r requirements-mcp.txt
-```
-
-## Run ingest
-
-1. Put files in `videos/` (e.g. `video_4.mp4`). Wait a few seconds after copy finishes.
-2. `docker compose up -d`
-3. Trigger **ingest_videos** at [http://127.0.0.1:8080](http://127.0.0.1:8080) or:
-
-```bash
-docker compose exec airflow-scheduler airflow dags trigger ingest_videos
-```
-
-Needs `.env` with Airflow Fernet, Neo4j password, and `OPENROUTER_API_KEY`. Do not commit `.env`.
+`correct_graph` updates or creates Person / Vehicle / Event / Object / Plate (not Video or Clip). `link_graph` adds `INVOLVES`, `CONTAINS`, `CONTINUES`, `HAS_*`. `merge_graph` collapses two people or cars into `keep_id` and deletes `drop_id`. Writes only when the user asked or corrected a fact.
 
 ## Layout
 
@@ -148,4 +195,5 @@ workers/             Spark, scan, enrich, fingerprint, graph write
 graph_mcp/           Code Four MCP
 data/videos/         per-video cache (clips, splice, ingest.json)
 scripts/             Codex MCP installer
+.env.example         copy to .env (Fernet, Neo4j password, OpenRouter key)
 ```
