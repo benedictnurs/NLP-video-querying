@@ -1,7 +1,7 @@
 # Observable event buckets for police video. These are scene labels, not charges.
 # Each top-level id is the Event.type in Neo4j (e.g. traffic_stop).
 # Gemini may add a new id when nothing here fits, and may edit aliases/phrases on an existing id.
-# topics: bundles for cross-video queries like "find all dui" or "find all miranda rights". Not charges.
+# topics: bundles for cross-video queries (dui, miranda). Not charges.
 
 topics:
   dui:
@@ -42,7 +42,6 @@ topics:
     event_types:
     - arrest
     - handcuffing
-
 traffic_stop:
   type: event
   title: Traffic stop / pulled over
@@ -127,6 +126,7 @@ arrest:
   - put your hands behind
   - i'm placing you under arrest
   - after I've arrested her
+  - So you're taking me in.
   source: gemini
 handcuffing:
   type: event
@@ -146,18 +146,18 @@ handcuffing:
 search_person:
   type: event
   title: Person search
-  description: 'Pat-down or search of a person''s clothing or belongings on their body.
-
-    '
-  how_to_confirm: 'Officer hands on clothing/pockets, or transcript "I''m going to search
-    you" / "do you have anything in your pockets".
-
-    '
+  description: Pat-down or search of a person's clothing or belongings on their body.
+  how_to_confirm: Officer hands on clothing/pockets, or transcript "I'm going to search you"
+    / "do you have anything in your pockets".
   transcript_any:
   - i'm going to search you
   - do you have anything in your pockets
   - empty your pockets
   - pat you down
+  - Is there anything on your persons that we missed during this church?
+  aliases:
+  - pat_down
+  source: gemini
 search_vehicle:
   type: event
   title: Vehicle search
@@ -300,15 +300,88 @@ medical_aid:
 welfare_check:
   type: event
   title: Welfare check
-  description: 'Officers checking on a person''s wellbeing rather than making a stop or arrest.
-
-    '
-  how_to_confirm: 'Language about checking on someone, making sure they are okay, a 911 hangup,
-    or similar. Not every greeting is a welfare check.
-
-    '
+  description: Officers checking on a person's wellbeing rather than making a stop or arrest.
+    This can include responding to a 911 hang-up, a call from a concerned citizen, or a request
+    to check on someone's safety. The interaction is typically initiated by the officers to
+    ascertain the person's condition and safety, not to investigate a crime or enforce a regulation,
+    though it may lead to other events.
+  how_to_confirm: Officers state they are there to check on the person's welfare, or the context
+    of the call (e.g., 911 hang-up) is mentioned. The interaction is not a traffic stop, a
+    response to a crime in progress, or a consensual encounter initiated by the civilian.
   transcript_any:
   - welfare check
   - making sure you're okay
   - someone called about you
   - are you alright
+  - check on you
+  - 911 hang up
+  aliases:
+  - welfare check
+  - making sure you're okay
+  - someone called about you
+  - are you alright
+  source: gemini
+trespass_warning:
+  type: event
+  title: Trespass Warning
+  description: An official notice given to an individual stating they are prohibited from
+    entering or remaining on a specific property for a defined period.
+  how_to_confirm: Officer states that a trespass warning is being issued, or provides documentation
+    of a trespass warning. The individual is informed they are not allowed to return to the
+    property.
+  aliases:
+  - trespass notice
+  - banned from property
+  transcript_any:
+  - trespass warning
+  - trespass notice
+  - not allowed back
+  - banned from property
+  source: gemini
+new_definitions:
+  type: event
+  title: new definitions
+  description: Officer issues a trespass warning to the civilian and requests identification.
+  how_to_confirm: Confirm from labeled frames and transcript quotes in the clip.
+  aliases: []
+  transcript_any:
+  - 'you''re gonna be trespass from this building oh yeah I love that you''re not allowed
+    to come back
+
+    including the parking lot so when we conclude here you''re gonna have to let
+
+    of course okay okay you''re not gonna get the trespass card there because you''re being
+    advised
+
+    and given a trespass warning'
+  source: gemini
+detention:
+  type: event
+  title: Detention
+  description: An officer informs a civilian they are being detained pending a supervisor's
+    decision on a DUI investigation.
+  how_to_confirm: Confirm from labeled frames and transcript quotes in the clip.
+  aliases: []
+  transcript_any:
+  - So for now on you know how it goes you can't consume anything, okay? Because right now
+    you're being detained
+  - Great what I'm holding on to you Because I have a supervisor coming to see if I need to
+    do a full-fledged UI investigation or not
+  - So I'm asking you what I need to.
+  source: gemini
+interview:
+  type: event
+  title: Interview
+  description: The officer, person_0, appears to be questioning the civilian, person_1, who
+    has their hands cuffed behind their back. The civilian responds to the officer's questions.
+  how_to_confirm: Confirm from labeled frames and transcript quotes in the clip.
+  aliases:
+  - interview
+  transcript_any:
+  - If you blow and you're good, I mean, you don't know what you got to.
+  - Yeah, it's a lot different when they ask you in an interview saying, hey, you know, what
+    would you do if this happened to, you know, your teeth.
+  - If you blow and you're good, I mean, you don't know what you got to.; Yeah, it's a lot
+    different when they ask you in an interview saying, hey, you know, what would you do if
+    this happened to, you know, your teeth.
+  source: gemini
