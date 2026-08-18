@@ -17,4 +17,4 @@ RUN curl -fsSL https://archive.apache.org/dist/spark/spark-3.5.3/spark-3.5.3-bin
     && mv /opt/spark-3.5.3-bin-hadoop3 /opt/spark
 
 USER airflow
-RUN pip install --no-cache-dir neo4j faster-whisper pyyaml pillow onnxruntime "protobuf<6" pyspark==3.5.3
+RUN pip install --no-cache-dir neo4j faster-whisper pyyaml pillow onnxruntime "protobuf<6" pyspark==3.5.3 langgraph

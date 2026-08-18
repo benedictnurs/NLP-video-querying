@@ -102,7 +102,15 @@ def enrich_clip_summaries(video: dict) -> dict:
     from workers.roster import load_roster, save_roster
 
     roster = load_roster(video["video_id"])
+    from workers.fingerprint import should_ask_gemini
+
     for record in records:
+        if not should_ask_gemini(record):
+            if not record.get("summary"):
+                tag_and_summarize_local(record)
+            record["summary_source"] = record.get("summary_source") or "local"
+            save_clip_record(video["video_id"], record)
+            continue
         try:
             updated = summarize_clip(record, api_key, roster)
         except Exception as exc:

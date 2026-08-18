@@ -6,7 +6,9 @@ import os
 from neo4j import GraphDatabase
 
 from workers.clips import load_clip_records
+from workers.clock import format_clock
 from workers.events import load_definitions
+from workers.fingerprint import RARE_ON_ROAD, WATER_LABELS
 from workers.ingest import load_registry, save_registry_entry
 from workers.paths import video_work_dir
 
@@ -88,8 +90,8 @@ def _write_clip(session, video: dict, record: dict, clip_id: str) -> None:
         SET c.video_id = $video_id,
             c.local_id = $local_id,
             c.index = $index,
-            c.start_ms = $start_ms,
-            c.end_ms = $end_ms,
+            c.start_timestamp = $start_timestamp,
+            c.end_timestamp = $end_timestamp,
             c.transcript = $transcript,
             c.summary = $summary,
             c.summary_source = $summary_source,
@@ -115,13 +117,14 @@ def _write_clip(session, video: dict, record: dict, clip_id: str) -> None:
             c.tagged_splice_uri = $tagged_splice_uri,
             c.clip_uri = $clip_uri,
             c.audio_uri = $audio_uri
+        REMOVE c.start_ms, c.end_ms, c.start_clock, c.end_clock
         """,
         video_id=video["video_id"],
         clip_id=clip_id,
         local_id=record["id"],
         index=record["index"],
-        start_ms=record["start_ms"],
-        end_ms=record["end_ms"],
+        start_timestamp=format_clock(record.get("start_ms")),
+        end_timestamp=format_clock(record.get("end_ms")),
         transcript=record.get("transcript") or "",
         summary=record.get("summary") or "",
         summary_source=record.get("summary_source"),
@@ -205,6 +208,20 @@ def _reset_video_observations(session, video_id: str) -> None:
         """,
         video_id=video_id,
     )
+    session.run(
+        """
+        MATCH (o:Object {video_id: $video_id})
+        DETACH DELETE o
+        """,
+        video_id=video_id,
+    )
+    session.run(
+        """
+        MATCH (p:Plate {video_id: $video_id})
+        DETACH DELETE p
+        """,
+        video_id=video_id,
+    )
 
 
 def _replace_observations(session, clip_id: str, record: dict) -> None:
@@ -233,25 +250,34 @@ def _replace_observations(session, clip_id: str, record: dict) -> None:
 
 def _write_entity(session, video_id: str, clip_id: str, entity: dict) -> None:
     kind = entity.get("type") or "object"
+    label = (entity.get("label") or "").lower()
+    if label in RARE_ON_ROAD | WATER_LABELS:
+        return
     if kind == "person":
         _write_person(session, video_id, clip_id, entity)
         return
     if kind == "vehicle":
         _write_vehicle(session, video_id, clip_id, entity)
         return
-    entity_id = f"{clip_id}:{entity.get('id') or entity.get('label')}"
+    entity_id = f"{video_id}:{entity.get('id') or entity.get('label') or 'object'}"
     session.run(
         """
         MATCH (c:Clip {id: $clip_id})
+        MATCH (v:Video {id: $video_id})
         MERGE (n:Object {id: $entity_id})
         SET n.label = $label_name,
-            n.video_id = $video_id
+            n.video_id = $video_id,
+            n.distinctive = $distinctive,
+            n.local_id = $local_id
         MERGE (c)-[:CONTAINS]->(n)
+        MERGE (v)-[:HAS_OBJECT]->(n)
         """,
         clip_id=clip_id,
         entity_id=entity_id,
         video_id=video_id,
         label_name=entity.get("label"),
+        distinctive=entity.get("distinctive") or "",
+        local_id=entity.get("id"),
     )
 
 
@@ -270,9 +296,18 @@ def _write_person(session, video_id: str, clip_id: str, entity: dict) -> None:
             p.hair = $hair,
             p.glasses = $glasses,
             p.clothes = $clothes,
+            p.shoes = $shoes,
+            p.bag = $bag,
+            p.distinctive = $distinctive,
             p.signature = $signature,
             p.description = $description,
-            p.is_cop = $is_cop
+            p.is_cop = $is_cop,
+            p.role = $role,
+            p.potential_suspect = $potential_suspect,
+            p.suspect_reason = $suspect_reason,
+            p.suspect_at = $suspect_at,
+            p.suspect_event = $suspect_event,
+            p.suspect_snapshot = $suspect_snapshot
         MERGE (c)-[:CONTAINS]->(p)
         MERGE (v)-[:HAS_PERSON]->(p)
         """,
@@ -285,16 +320,26 @@ def _write_person(session, video_id: str, clip_id: str, entity: dict) -> None:
         hair=entity.get("hair") or "unknown",
         glasses=entity.get("glasses") or "unknown",
         clothes=entity.get("clothes") or entity.get("clothing") or "",
+        shoes=entity.get("shoes") or "",
+        bag=entity.get("bag") or "",
+        distinctive=entity.get("distinctive") or "",
         signature=entity.get("signature") or "",
         description=entity.get("description") or "",
         is_cop=entity.get("is_cop"),
+        role=entity.get("role")
+        or ("officer" if entity.get("is_cop") is True else "civilian"),
+        potential_suspect=bool(entity.get("potential_suspect")),
+        suspect_reason=entity.get("suspect_reason") or "",
+        suspect_at=entity.get("suspect_at") or "",
+        suspect_event=entity.get("suspect_event") or "",
+        suspect_snapshot=entity.get("suspect_snapshot") or "",
     )
 
 
 def _write_vehicle(session, video_id: str, clip_id: str, entity: dict) -> None:
     plate = entity.get("plate") or ""
     local_id = entity.get("id") or "vehicle"
-    vehicle_id = f"{video_id}:vehicle:{plate}" if plate else f"{video_id}:{local_id}"
+    vehicle_id = f"{video_id}:{local_id}"
     session.run(
         """
         MATCH (c:Clip {id: $clip_id})
@@ -317,23 +362,33 @@ def _write_vehicle(session, video_id: str, clip_id: str, entity: dict) -> None:
 
 
 def _write_plate(session, video_id: str, clip_id: str, plate: dict) -> None:
-    plate_id = f"{clip_id}:plate:{plate['text']}"
+    text = plate["text"]
+    plate_id = f"{video_id}:plate:{text}"
     session.run(
         """
         MATCH (c:Clip {id: $clip_id})
+        MATCH (vid:Video {id: $video_id})
         MERGE (p:Plate {id: $plate_id})
         SET p.text = $text,
+            p.video_id = $video_id,
             p.confidence = $confidence,
             p.source = $source
         MERGE (c)-[:CONTAINS]->(p)
+        MERGE (vid)-[:HAS_PLATE]->(p)
         """,
         clip_id=clip_id,
+        video_id=video_id,
         plate_id=plate_id,
-        text=plate["text"],
+        text=text,
         confidence=plate.get("confidence"),
         source=plate.get("source") or "gemini",
     )
-    graph_vehicle = f"{video_id}:vehicle:{plate['text']}"
+    vehicle_local = plate.get("vehicle_id") or ""
+    if not vehicle_local:
+        return
+    graph_vehicle = (
+        vehicle_local if str(vehicle_local).startswith(f"{video_id}:") else f"{video_id}:{vehicle_local}"
+    )
     session.run(
         """
         MATCH (p:Plate {id: $plate_id})
@@ -385,9 +440,10 @@ def _merge_event_type(session, type_id: str, title: str, description: str, alias
 
 
 def _write_event(session, clip_id: str, clip: dict, event: dict) -> None:
-    type_id = event.get("definition") or "event"
+    type_id = event.get("type") or event.get("definition") or "event"
     title = event.get("title") or type_id.replace("_", " ")
-    event_id = f"{clip_id}:{type_id}:{event.get('start_ms', clip['start_ms'])}"
+    times = _event_window(event, clip)
+    event_id = f"{clip_id}:{type_id}:{times['start_ms']}"
     session.run(
         """
         MATCH (c:Clip {id: $clip_id})
@@ -399,16 +455,22 @@ def _write_event(session, clip_id: str, clip: dict, event: dict) -> None:
         ON MATCH SET t.title = coalesce(t.title, $title),
                      t.name = coalesce(t.name, $title)
         MERGE (e:Event {id: $event_id})
-        SET e.definition = $type_id,
+        SET e.type = $type_id,
+            e.definition = $type_id,
             e.title = $title,
             e.summary = $summary,
             e.analysis = $analysis,
+            e.important = $important,
+            e.transcript = $transcript,
             e.context = $context,
-            e.start_ms = $start_ms,
-            e.end_ms = $end_ms,
+            e.start_timestamp = $start_timestamp,
+            e.end_timestamp = $end_timestamp,
+            e.seek_s = $seek_s,
+            e.cell = $cell,
             e.confidence = $confidence,
             e.source = $source,
             e.evidence = $evidence
+        REMOVE e.start_ms, e.end_ms, e.clock, e.end_clock
         MERGE (c)-[:CONTAINS]->(e)
         MERGE (c)-[:HAS_TYPE]->(t)
         MERGE (e)-[:INSTANCE_OF]->(t)
@@ -421,25 +483,52 @@ def _write_event(session, clip_id: str, clip: dict, event: dict) -> None:
         type_id=type_id,
         event_id=event_id,
         title=title,
-        summary=event.get("summary") or event.get("context") or "",
+        summary=(event.get("summary") or clip.get("summary") or event.get("context") or ""),
         analysis=event.get("analysis") or "",
+        important=event.get("important") or clip.get("important") or [],
+        transcript=(event.get("transcript") or clip.get("transcript") or ""),
         context=event.get("context"),
-        start_ms=event.get("start_ms", clip["start_ms"]),
-        end_ms=event.get("end_ms", clip["end_ms"]),
+        start_timestamp=times["start_timestamp"],
+        end_timestamp=times["end_timestamp"],
+        seek_s=times["seek_s"],
+        cell=event.get("cell"),
         confidence=event.get("confidence"),
         source=event.get("source") or "model",
         evidence=json.dumps(event.get("evidence") or []),
     )
+    continues_from = event.get("continues_from")
+    if continues_from:
+        session.run(
+            """
+            MATCH (prev:Event {id: $prev_id})
+            MATCH (e:Event {id: $event_id})
+            MERGE (prev)-[:CONTINUES]->(e)
+            """,
+            prev_id=continues_from,
+            event_id=event_id,
+        )
     video_id = clip.get("video_id") or ""
+    roles = event.get("people_roles") or {}
     for person_id in event.get("people_ids") or []:
         session.run(
             """
             MATCH (e:Event {id: $event_id})
             MATCH (p:Person {id: $person_id})
-            MERGE (e)-[:INVOLVES]->(p)
+            MERGE (e)-[rel:INVOLVES]->(p)
+            SET rel.role = $role
             """,
             event_id=event_id,
             person_id=f"{video_id}:{person_id}",
+            role=roles.get(person_id) or "unknown",
+        )
+    if event.get("subject_ids"):
+        session.run(
+            """
+            MATCH (e:Event {id: $event_id})
+            SET e.subject_ids = $subject_ids
+            """,
+            event_id=event_id,
+            subject_ids=event.get("subject_ids") or [],
         )
     for vehicle_id in event.get("vehicle_ids") or []:
         session.run(
@@ -454,6 +543,39 @@ def _write_event(session, clip_id: str, clip: dict, event: dict) -> None:
             plate=str(vehicle_id).upper(),
             local=vehicle_id,
         )
+    for object_id in event.get("object_ids") or []:
+        session.run(
+            """
+            MATCH (e:Event {id: $event_id})
+            MATCH (n:Object)
+            WHERE n.id = $object_id OR n.id ENDS WITH $local
+            MERGE (e)-[:INVOLVES]->(n)
+            """,
+            event_id=event_id,
+            object_id=f"{video_id}:{object_id}",
+            local=object_id,
+        )
+
+
+def _event_window(event: dict, clip: dict) -> dict:
+    start_ms = int(event.get("start_ms", clip["start_ms"]))
+    end_ms = int(event.get("end_ms", clip["end_ms"]))
+    start_timestamp = (
+        event.get("start_timestamp")
+        or event.get("start_clock")
+        or event.get("clock")
+        or format_clock(start_ms)
+    )
+    end_timestamp = event.get("end_timestamp") or event.get("end_clock") or format_clock(end_ms)
+    seek_s = event.get("seek_s")
+    if seek_s is None:
+        seek_s = round(start_ms / 1000.0, 3)
+    return {
+        "start_ms": start_ms,
+        "start_timestamp": start_timestamp,
+        "end_timestamp": end_timestamp,
+        "seek_s": seek_s,
+    }
 
 
 def _ensure_constraints(session) -> None:
@@ -513,13 +635,33 @@ def _ensure_constraints(session) -> None:
     )
     session.run(
         """
+        CREATE INDEX person_potential_suspect IF NOT EXISTS
+        FOR (p:Person) ON (p.potential_suspect)
+        """
+    )
+    session.run(
+        """
         CREATE INDEX person_clothes IF NOT EXISTS
         FOR (p:Person) ON (p.clothes)
         """
     )
     session.run(
         """
-        CREATE INDEX event_definition IF NOT EXISTS
-        FOR (e:Event) ON (e.definition)
+        CREATE INDEX event_type IF NOT EXISTS
+        FOR (e:Event) ON (e.type)
+        """
+    )
+    session.run("DROP INDEX event_start IF EXISTS")
+    session.run("DROP INDEX event_clock IF EXISTS")
+    session.run(
+        """
+        CREATE INDEX event_start_timestamp IF NOT EXISTS
+        FOR (e:Event) ON (e.start_timestamp)
+        """
+    )
+    session.run(
+        """
+        CREATE INDEX event_end_timestamp IF NOT EXISTS
+        FOR (e:Event) ON (e.end_timestamp)
         """
     )

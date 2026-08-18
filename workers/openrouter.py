@@ -33,7 +33,13 @@ def enrich_video_clips(video: dict) -> dict:
 
 
 def summarize_clip(record: dict, api_key: str, roster: list[dict] | None = None) -> dict:
-    from workers.events import attach_event_metadata, catalog_for_prompt, persist_new_definitions
+    from workers.clock import cell_timeline, format_clock, transcript_timeline
+    from workers.events import (
+        attach_event_metadata,
+        catalog_for_prompt,
+        ensure_event_definitions,
+        persist_new_definitions,
+    )
     from workers.roster import public_roster
     from workers.summarize import local_tags, local_summary
 
@@ -49,22 +55,40 @@ def summarize_clip(record: dict, api_key: str, roster: list[dict] | None = None)
         if record.get("night")
         else ""
     )
-    transcript = (record.get("transcript") or "").strip() or "(no speech transcribed)"
+    proposed = [
+        {
+            "type": item.get("type") or item.get("definition"),
+            "start_ms": item.get("start_ms"),
+            "clock": item.get("clock") or item.get("start_clock"),
+            "cell": item.get("cell"),
+        }
+        for item in (record.get("events") or [])
+    ]
     prompt = (
         "You are summarizing a police bodycam/dashcam clip for a searchable graph. "
         "Return JSON only. Observable appearance and behavior only. No names, intent, "
         "guilt, intoxication, or legal conclusions. Event ids are scene labels, not charges.\n\n"
-        "Use an existing event id when the clip matches its context and evidence rules. "
-        "Only propose new_definitions when nothing in the catalog fits.\n\n"
+        "Event.type is the catalog id, e.g. traffic_stop. Reuse an existing id when the clip "
+        "matches its context and evidence rules. If the scene matches an existing id but the "
+        "catalog is missing a phrase, alias, or clearer description, put that in "
+        "updated_definitions for that id. Only add a new_definitions id when nothing in the "
+        "catalog fits, then use that same new id as the event type on this clip. New ids must "
+        "be snake_case scene labels, not charges.\n\n"
         f"Event catalog:\n{catalog}\n\n"
-        f"Time: {record.get('start_ms')}ms–{record.get('end_ms')}ms\n"
+        f"Time: {format_clock(record.get('start_ms'))}–{format_clock(record.get('end_ms'))} "
+        f"({record.get('start_ms')}ms–{record.get('end_ms')}ms)\n"
         f"Clip: {record.get('id')}\n"
-        f"Transcript (quote from this):\n{transcript}\n\n"
+        f"Splice cells:\n{cell_timeline(record)}\n"
+        f"Transcript (quote from this, times are video clocks):\n{transcript_timeline(record)}\n\n"
         f"Detector hints: {json.dumps(_public_entities(record))}\n"
         f"Known people already seen in this video: {json.dumps(public_roster(roster))}\n"
         f"Signals: {json.dumps(record.get('signals') or {})}\n"
+        f"Proposed timed events from the quick scan (keep or correct clocks): {json.dumps(proposed)}\n"
         f"{night_bit}"
-        "Look at the attached labeled frames and clothing/plate crops.\n"
+        "Look at the attached labeled splice (a grid of timestamped frames). "
+        "If extra crops are attached, they are key-event closeups (torso or a loud/arrest frame). "
+        "Detector labels can be wrong; ignore boats, trains, or watercraft if the scene is a road, "
+        "parking lot, or sidewalk.\n"
         "Create Person, Vehicle, and Event records for this clip.\n"
         "People: from the images, describe hair, glasses, clothes, shoes, bag, "
         "and any distinctive item (hat, mask, backpack). If that signature matches a "
@@ -85,8 +109,10 @@ def summarize_clip(record: dict, api_key: str, roster: list[dict] | None = None)
         "Miranda or rights language, license plates, vehicle motion (stopped, lights, "
         "pursuit), loud impacts, and anything unusual. Put those in important as short facts. "
         "Omit anything not actually seen or heard.\n"
-        "Events: definition MUST be an id from the event catalog (or an alias). "
-        "Do not invent event ids. Each event summary must name the involved people by id "
+        "Events: type (and definition) MUST be a catalog id, or a new_definitions id you just "
+        "added. Each event MUST include start_ms and start_clock for when it began in the "
+        "full video (not the clip start). Use splice cell clocks and transcript times. "
+        "Each event summary must name the involved people by id "
         "and clothing, quote the relevant transcript lines, state the observable action, "
         "and include any other important details for that event. "
         "analysis is 3–6 sentences: who did what, what they were wearing, vehicles/plates, "
@@ -98,11 +124,14 @@ def summarize_clip(record: dict, api_key: str, roster: list[dict] | None = None)
         '"bag": str, "distinctive": str, "description": str}], '
         '"vehicles": [{"id": str, "color": str, "plate": str, "analysis": str}], '
         '"plates": [{"text": str, "vehicle_id": str, "confidence": float}], '
-        '"events": [{"definition": str, "summary": str, "analysis": str, '
+        '"events": [{"type": str, "definition": str, "start_ms": int, "end_ms": int, '
+        '"start_clock": str, "cell": int, "summary": str, "analysis": str, '
         '"confidence": float, "people_ids": [str], "vehicle_ids": [str], '
         '"evidence": [{"modality": str, "value": str}]}], '
         '"new_definitions": [{"id": str, "title": str, "description": str, '
-        '"how_to_confirm": str, "transcript_any": [str]}]}'
+        '"how_to_confirm": str, "aliases": [str], "transcript_any": [str]}], '
+        '"updated_definitions": [{"id": str, "title": str, "description": str, '
+        '"how_to_confirm": str, "aliases": [str], "transcript_any": [str]}]}'
     )
     content = [{"type": "text", "text": prompt}]
     for image in images:
@@ -148,12 +177,20 @@ def summarize_clip(record: dict, api_key: str, roster: list[dict] | None = None)
         if str(item).strip()
     ]
     record["summary_source"] = "openrouter_vision" if images else "openrouter"
-    added = persist_new_definitions(parsed.get("new_definitions") or [])
     events = parsed.get("events") or []
+    added = persist_new_definitions(
+        parsed.get("new_definitions") or [],
+        parsed.get("updated_definitions") or [],
+    )
+    added.extend(name for name in ensure_event_definitions(events) if name not in added)
     for name in added:
-        if not any(item.get("definition") == name or item.get("id") == name for item in events):
+        if not any(
+            item.get("type") == name or item.get("definition") == name or item.get("id") == name
+            for item in events
+        ):
             events.append(
                 {
+                    "type": name,
                     "definition": name,
                     "source": "gemini_learned",
                     "confidence": 0.55,
@@ -265,26 +302,28 @@ def _keyframes(record: dict, count: int = 4) -> list[str]:
 
 
 def _bucket_images(record: dict) -> list[str]:
+    from workers.fingerprint import is_key_clip
+
     encoded = []
     seen = set()
     uris: list[str] = []
     splice = record.get("tagged_splice_uri") or record.get("splice_uri")
     if splice:
         uris.append(splice)
-    frames_dir = Path(record.get("folder_uri") or Path(record.get("clip_uri") or ".").parent) / "frames"
-    cells = sorted(frames_dir.glob("cell_*.jpg")) if frames_dir.exists() else []
-    if cells:
-        if len(cells) <= 4:
-            picked = cells
-        else:
-            picked = [cells[int(round(i * (len(cells) - 1) / 3))] for i in range(4)]
-        uris.extend(str(path) for path in picked)
-    uris.extend(record.get("vision_uris") or [])
-    for entity in record.get("entities") or []:
-        for key in ("crop_uri", "plate_crop_uri", "tagged_frame_uri"):
-            path = entity.get(key)
+    if is_key_clip(record):
+        frames_dir = Path(record.get("folder_uri") or Path(record.get("clip_uri") or ".").parent) / "frames"
+        cells = sorted(frames_dir.glob("cell_*.jpg")) if frames_dir.exists() else []
+        if cells:
+            uris.append(str(cells[len(cells) // 2]))
+        crops = 0
+        for entity in record.get("entities") or []:
+            path = entity.get("crop_uri") if entity.get("type") == "person" else entity.get("plate_crop_uri")
             if path:
                 uris.append(path)
+                crops += 1
+            if crops >= 2:
+                break
+    cap = 4 if is_key_clip(record) else 1
     for uri in uris:
         path = Path(uri)
         key = str(path)
@@ -292,7 +331,7 @@ def _bucket_images(record: dict) -> list[str]:
             continue
         seen.add(key)
         encoded.append(base64.b64encode(path.read_bytes()).decode())
-        if len(encoded) >= 8:
+        if len(encoded) >= cap:
             break
     return encoded
 
@@ -311,7 +350,6 @@ def _public_entities(record: dict) -> list[dict]:
                     or item.get("clothing")
                     or item.get("upper_clothing_color")
                     or item.get("image_tag"),
-                    "caption": item.get("caption") or item.get("image_tag"),
                     "is_cop_hint": item.get("uniform_like"),
                 }
             )
@@ -323,7 +361,6 @@ def _public_entities(record: dict) -> list[dict]:
                     "label": item.get("label"),
                     "color": item.get("color") or item.get("upper_clothing_color"),
                     "plate": item.get("plate"),
-                    "caption": item.get("caption"),
                 }
             )
         else:

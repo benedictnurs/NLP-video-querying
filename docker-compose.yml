@@ -16,8 +16,9 @@ x-airflow-common: &airflow-common
     NEO4J_PASSWORD: ${NEO4J_PASSWORD}
     OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
     OPENROUTER_MODEL: ${OPENROUTER_MODEL:-google/gemini-2.5-flash-lite}
+    OPENROUTER_FINGERPRINT_MODEL: ${OPENROUTER_FINGERPRINT_MODEL:-google/gemini-3.5-flash}
     WHISPER_MODEL: ${WHISPER_MODEL:-Systran/faster-whisper-tiny.en}
-    YOLO_ONNX_URL: ${YOLO_ONNX_URL:-https://huggingface.co/Kalray/yolov8/resolve/main/yolov8s.onnx}
+    YOLO_ONNX_URL: ${YOLO_ONNX_URL:-https://huggingface.co/Kalray/yolov8/resolve/main/yolov8n.onnx}
     CAPTION_ENCODER_URL: ${CAPTION_ENCODER_URL:-https://huggingface.co/Xenova/vit-gpt2-image-captioning/resolve/main/onnx/encoder_model_quantized.onnx}
     CAPTION_DECODER_URL: ${CAPTION_DECODER_URL:-https://huggingface.co/Xenova/vit-gpt2-image-captioning/resolve/main/onnx/decoder_model_quantized.onnx}
     CAPTION_TOKENIZER_URL: ${CAPTION_TOKENIZER_URL:-https://huggingface.co/Xenova/vit-gpt2-image-captioning/resolve/main/tokenizer.json}
@@ -192,7 +193,7 @@ services:
       DATA_DIR: /opt/airflow/data
       HF_HOME: /opt/airflow/data/models/huggingface
       WHISPER_MODEL: ${WHISPER_MODEL:-Systran/faster-whisper-tiny.en}
-      YOLO_ONNX_URL: ${YOLO_ONNX_URL:-https://huggingface.co/Kalray/yolov8/resolve/main/yolov8s.onnx}
+      YOLO_ONNX_URL: ${YOLO_ONNX_URL:-https://huggingface.co/Kalray/yolov8/resolve/main/yolov8n.onnx}
       CAPTION_ENCODER_URL: ${CAPTION_ENCODER_URL:-https://huggingface.co/Xenova/vit-gpt2-image-captioning/resolve/main/onnx/encoder_model_quantized.onnx}
       CAPTION_DECODER_URL: ${CAPTION_DECODER_URL:-https://huggingface.co/Xenova/vit-gpt2-image-captioning/resolve/main/onnx/decoder_model_quantized.onnx}
       CAPTION_TOKENIZER_URL: ${CAPTION_TOKENIZER_URL:-https://huggingface.co/Xenova/vit-gpt2-image-captioning/resolve/main/tokenizer.json}

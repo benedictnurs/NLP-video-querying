@@ -1,16 +1,35 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+from workers.audio_signals import audio_signals
 from workers.clips import load_clip_records, save_clip_record, save_video_status
 from workers.events import attach_event_metadata, events_from_local, load_definitions
+from workers.fingerprint import denoise_clip, is_key_clip, scene_prior
 
 
 def score_video_clips(video: dict) -> dict:
     definitions = load_definitions()
-    for record in load_clip_records(video["video_id"]):
+    records = load_clip_records(video["video_id"])
+    scene = scene_prior(records)
+    for record in records:
+        prev = record.get("signals") or {}
+        wav = Path(record.get("audio_uri") or "")
+        if wav.exists():
+            fresh = audio_signals(wav)
+            record["signals"] = {
+                **prev,
+                **fresh,
+                "yelling": fresh["loud_speech"],
+                "repeated_commands": prev.get("repeated_commands") or 0,
+            }
+        denoise_clip(record, scene)
         candidates = _candidates(record, definitions)
-        record["important"] = bool(candidates)
         record["candidate_definitions"] = candidates
-        record["analysis_status"] = "needed" if candidates else "local_only"
+        record["key_clip"] = is_key_clip(record)
+        record["analysis_status"] = "needed" if record["key_clip"] or record.get("person_count") or record.get("vehicle_count") else "local_only"
+        if not isinstance(record.get("important"), list):
+            record.pop("important", None)
         attach_event_metadata(record, events_from_local(record, definitions))
         save_clip_record(video["video_id"], record)
     return save_video_status(video, "scored")

@@ -46,6 +46,29 @@ def annotate_image(image_path: Path, detections: list[dict], dest: Path | None =
     return dest
 
 
+def stamp_clock(image_path: Path, clock: str, dest: Path | None = None) -> Path | None:
+    if not image_path.exists():
+        return None
+    dest = dest or image_path
+    image = Image.open(image_path).convert("RGB")
+    draw = ImageDraw.Draw(image)
+    font = _font(image)
+    text = (clock or "").strip()
+    if not text:
+        return dest
+    pad = 6
+    box = draw.textbbox((pad, pad), text, font=font)
+    width = box[2] - box[0]
+    height = box[3] - box[1]
+    x = pad
+    y = max(pad, image.height - height - pad * 2)
+    draw.rectangle([x - 2, y - 2, x + width + 4, y + height + 4], fill=TEXT_BG)
+    draw.text((x, y), text, fill=(255, 220, 40), font=font)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    image.save(dest, quality=95)
+    return dest
+
+
 def stamp_label(image_path: Path, label: str, dest: Path | None = None) -> Path | None:
     if not image_path.exists():
         return None

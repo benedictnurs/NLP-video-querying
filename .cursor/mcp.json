@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "video-intel-graph": {
+      "command": "/Users/benedictnursalim/Developer/NLP video querying/.venv/bin/python",
+      "args": [
+        "/Users/benedictnursalim/Developer/NLP video querying/graph_mcp/server.py"
+      ],
+      "env": {
+        "PYTHONPATH": "/Users/benedictnursalim/Developer/NLP video querying",
+        "NEO4J_URI": "bolt://127.0.0.1:7687"
+      }
+    }
+  }
+}

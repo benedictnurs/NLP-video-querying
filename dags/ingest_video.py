@@ -13,7 +13,7 @@ default_args = {
 
 @dag(
     dag_id="ingest_videos",
-    description="Copy video → Spark clips → YAML event catalog + Gemini bucketing with evidence → every clip to Neo4j.",
+    description="Copy video → Spark clips → VLM event scan with clocks → people → fingerprint → Neo4j.",
     start_date=datetime(2026, 1, 1),
     schedule=None,
     catchup=False,
@@ -37,7 +37,7 @@ def ingest_videos():
 
     @task
     def spark_process_clips(video: dict) -> dict:
-        """One Spark worker per ~3 min splice: cut, whisper, YOLO, captions."""
+        """One Spark worker per splice: cut, whisper, YOLO nano, splice. No captioner."""
         from workers.spark_job import process_video_on_spark
 
         return process_video_on_spark(video)
@@ -49,11 +49,25 @@ def ingest_videos():
         return score_video_clips(video)
 
     @task
+    def scan_events_vlm(video: dict) -> dict:
+        """Fast parallel Gemini splice scan: event types + start clocks."""
+        from workers.scan import scan_video_events
+
+        return scan_video_events(video)
+
+    @task
     def analyze_important_openrouter(video: dict) -> dict:
-        """Gemini: people, clothes, transcript quotes, YAML events with evidence."""
+        """Gemini: splice for people/events; extra frames only on loud/arrest clips."""
         from workers.openrouter import enrich_video_clips
 
         return enrich_video_clips(video)
+
+    @task
+    def fingerprint_identities(video: dict) -> dict:
+        """LangGraph agent: match people/vehicles/plates/objects across clips."""
+        from workers.fingerprint import fingerprint_video
+
+        return fingerprint_video(video)
 
     @task
     def write_graph(video: dict) -> dict:
@@ -73,8 +87,10 @@ def ingest_videos():
     ingested = ingest_video.expand(source_path=paths)
     processed = spark_process_clips.expand(video=ingested)
     scored = score_clips.expand(video=processed)
-    analyzed = analyze_important_openrouter.expand(video=scored)
-    graphed = write_graph.expand(video=analyzed)
+    scanned = scan_events_vlm.expand(video=scored)
+    analyzed = analyze_important_openrouter.expand(video=scanned)
+    fingerprinted = fingerprint_identities.expand(video=analyzed)
+    graphed = write_graph.expand(video=fingerprinted)
     finalize(graphed)
 
 

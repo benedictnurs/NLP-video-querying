@@ -5,7 +5,7 @@ from pathlib import Path
 
 from workers.paths import video_work_dir
 
-SIGN_KEYS = ("gender", "hair", "glasses", "clothes", "shoes", "bag", "distinctive")
+SIGN_KEYS = ("race", "gender", "hair", "glasses", "clothes", "shoes", "bag", "distinctive")
 
 
 def roster_path(video_id: str) -> Path:
@@ -42,16 +42,211 @@ def public_roster(people: list[dict]) -> list[dict]:
             {
                 "id": item.get("id"),
                 "signature": item.get("signature") or make_signature(item),
+                "race": item.get("race") or "unknown",
                 "gender": item.get("gender") or "unknown",
                 "hair": item.get("hair") or "unknown",
                 "glasses": item.get("glasses") or "unknown",
                 "clothes": item.get("clothes") or "",
                 "is_cop": item.get("is_cop"),
+                "role": item.get("role") or ("officer" if item.get("is_cop") is True else "civilian"),
+                "potential_suspect": bool(item.get("potential_suspect")),
                 "description": item.get("description") or "",
                 "last_clip": item.get("last_clip"),
             }
         )
     return public
+
+
+def identities_path(video_id: str) -> Path:
+    return video_work_dir(video_id) / "identities.json"
+
+
+def load_identities(video_id: str) -> dict:
+    path = identities_path(video_id)
+    empty = {"people": [], "vehicles": [], "plates": [], "objects": []}
+    if not path.exists():
+        people = load_roster(video_id)
+        return {**empty, "people": people}
+    try:
+        data = json.loads(path.read_text())
+    except json.JSONDecodeError:
+        return empty
+    if not isinstance(data, dict):
+        return empty
+    for key in empty:
+        rows = data.get(key) or []
+        empty[key] = [item for item in rows if isinstance(item, dict)]
+    if not empty["people"]:
+        empty["people"] = load_roster(video_id)
+    return empty
+
+
+def save_identities(video_id: str, identities: dict) -> Path:
+    payload = {
+        "people": identities.get("people") or [],
+        "vehicles": identities.get("vehicles") or [],
+        "plates": identities.get("plates") or [],
+        "objects": identities.get("objects") or [],
+    }
+    path = identities_path(video_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2) + "\n")
+    save_roster(video_id, payload["people"])
+    return path
+
+
+def public_vehicles(vehicles: list[dict]) -> list[dict]:
+    public = []
+    for item in vehicles:
+        public.append(
+            {
+                "id": item.get("id"),
+                "color": item.get("color") or "",
+                "plate": item.get("plate") or "",
+                "analysis": item.get("analysis") or "",
+                "last_clip": item.get("last_clip"),
+            }
+        )
+    return public
+
+
+def public_objects(objects: list[dict]) -> list[dict]:
+    public = []
+    for item in objects:
+        public.append(
+            {
+                "id": item.get("id"),
+                "label": item.get("label") or "",
+                "distinctive": item.get("distinctive") or "",
+                "last_clip": item.get("last_clip"),
+            }
+        )
+    return public
+
+
+def upsert_vehicle(roster: list[dict], vehicle: dict, clip_id: str) -> dict:
+    plate = _plate(vehicle.get("plate"))
+    color = (vehicle.get("color") or "").strip().lower()
+    local_id = (vehicle.get("id") or "").strip()
+    match = (vehicle.get("match") or "").strip().lower()
+    existing = None
+    if plate:
+        existing = next((item for item in roster if item.get("plate") == plate), None)
+    if existing is None and local_id:
+        existing = next((item for item in roster if item.get("id") == local_id), None)
+    if existing is None and match != "new" and color:
+        existing = next(
+            (item for item in roster if item.get("color") == color and not item.get("plate")),
+            None,
+        )
+    if existing is None:
+        vid = local_id if local_id.startswith("vehicle_") else _next_prefixed(roster, "vehicle_")
+        card = {
+            "id": vid,
+            "color": color,
+            "plate": plate,
+            "analysis": (vehicle.get("analysis") or "").strip(),
+            "first_clip": clip_id,
+            "last_clip": clip_id,
+            "clips": [clip_id],
+        }
+        roster.append(card)
+        return card
+    if plate:
+        existing["plate"] = plate
+    if color and not existing.get("color"):
+        existing["color"] = color
+    analysis = (vehicle.get("analysis") or "").strip()
+    if analysis and len(analysis) > len(existing.get("analysis") or ""):
+        existing["analysis"] = analysis
+    existing["last_clip"] = clip_id
+    clips = existing.setdefault("clips", [])
+    if clip_id not in clips:
+        clips.append(clip_id)
+    return existing
+
+
+def upsert_plate(roster: list[dict], plate: dict, clip_id: str) -> dict | None:
+    text = _plate(plate.get("text") or plate.get("plate"))
+    if not text:
+        return None
+    existing = next((item for item in roster if item.get("text") == text), None)
+    if existing is None:
+        card = {
+            "id": f"plate_{text}",
+            "text": text,
+            "vehicle_id": plate.get("vehicle_id"),
+            "confidence": plate.get("confidence") or 0.6,
+            "clips": [clip_id],
+            "last_clip": clip_id,
+        }
+        roster.append(card)
+        return card
+    if plate.get("vehicle_id"):
+        existing["vehicle_id"] = plate.get("vehicle_id")
+    existing["last_clip"] = clip_id
+    clips = existing.setdefault("clips", [])
+    if clip_id not in clips:
+        clips.append(clip_id)
+    return existing
+
+
+def upsert_object(roster: list[dict], obj: dict, clip_id: str) -> dict:
+    label = (obj.get("label") or obj.get("type") or "object").strip().lower()
+    distinctive = (obj.get("distinctive") or "").strip().lower()
+    local_id = (obj.get("id") or "").strip()
+    existing = None
+    if distinctive:
+        existing = next(
+            (
+                item
+                for item in roster
+                if item.get("label") == label and (item.get("distinctive") or "").lower() == distinctive
+            ),
+            None,
+        )
+    if existing is None:
+        existing = next(
+            (item for item in roster if item.get("id") == local_id and local_id.startswith("object_")),
+            None,
+        )
+    if existing is None:
+        oid = local_id if local_id.startswith("object_") else _next_prefixed(roster, "object_")
+        card = {
+            "id": oid,
+            "label": label,
+            "distinctive": distinctive,
+            "first_clip": clip_id,
+            "last_clip": clip_id,
+            "clips": [clip_id],
+        }
+        roster.append(card)
+        return card
+    if distinctive and not existing.get("distinctive"):
+        existing["distinctive"] = distinctive
+    existing["last_clip"] = clip_id
+    clips = existing.setdefault("clips", [])
+    if clip_id not in clips:
+        clips.append(clip_id)
+    return existing
+
+
+def _next_prefixed(roster: list[dict], prefix: str) -> str:
+    numbers = []
+    for item in roster:
+        raw = str(item.get("id") or "").replace(prefix, "")
+        if raw.isdigit():
+            numbers.append(int(raw))
+    return f"{prefix}{max(numbers, default=0) + 1}"
+
+
+def _plate(value) -> str:
+    text = "".join(ch for ch in str(value or "").upper() if ch.isalnum())
+    if len(text) < 4 or len(text) > 10:
+        return ""
+    if not any(ch.isdigit() for ch in text):
+        return ""
+    return text
 
 
 def make_signature(person: dict) -> str:

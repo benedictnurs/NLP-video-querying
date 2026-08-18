@@ -1,235 +1,264 @@
 # Observable event buckets for police video. These are scene labels, not charges.
-# Gemini should reuse these ids when evidence matches. It may propose a new id
-# only when nothing here fits; new ids land in data/definitions_learned.yaml.
+# Each top-level id is the Event.type in Neo4j (e.g. traffic_stop).
+# Gemini may add a new id when nothing here fits, and may edit aliases/phrases on an existing id.
 
 traffic_stop:
   type: event
   title: Traffic stop / pulled over
-  aliases: [pulled_over, roadside_stop]
-  description: >
-    An officer has stopped a vehicle. Typical scene: patrol lights, a stopped
-    car, the officer at the driver window, requests for license and registration,
-    or an explanation of why the vehicle was stopped.
-  how_to_confirm: >
-    Need stop language in the transcript and/or a stopped vehicle with an officer
+  aliases:
+  - pulled_over
+  - roadside_stop
+  description: 'An officer has stopped a vehicle. Typical scene: patrol lights, a stopped
+    car, the officer at the driver window, requests for license and registration, or an explanation
+    of why the vehicle was stopped.'
+  how_to_confirm: Need stop language in the transcript and/or a stopped vehicle with an officer
     beside it. Driving past cars is not a stop.
   transcript_any:
-    - "license and registration"
-    - "the reason i stopped you"
-    - "the reason I stopped you"
-    - "pull over"
-    - "do you know why i stopped"
-    - "step out of the vehicle"
-    - "insurance"
+  - license and registration
+  - the reason i stopped you
+  - the reason I stopped you
+  - pull over
+  - do you know why i stopped
+  - step out of the vehicle
+  - insurance
   visual_any:
-    - officer at vehicle window
-    - emergency lights on a stopped vehicle
-
+  - officer at vehicle window
+  - emergency lights on a stopped vehicle
+  source: gemini
 interrogation:
   type: event
   title: Interrogation / custodial questioning
-  aliases: [interview, questioning]
-  description: >
-    Sustained questioning of a person about what happened, where they were, or
-    who was involved. May be roadside, in a car, or in a room. Distinct from a
-    brief license request during a stop.
-  how_to_confirm: >
-    Repeated questions and answers in the transcript, not a single command.
-    Do not infer guilt from the answers.
-  transcript_any:
-    - "where were you"
-    - "tell me what happened"
-    - "who were you with"
-    - "what were you doing"
-    - "i'm going to ask you"
-    - "do you understand"
+  aliases:
+  - interview
+  - questioning
+  description: 'Sustained questioning of a person about what happened, where they were, or
+    who was involved. May be roadside, in a car, or in a room. Distinct from a brief license
+    request during a stop.
 
+    '
+  how_to_confirm: 'Repeated questions and answers in the transcript, not a single command.
+    Do not infer guilt from the answers.
+
+    '
+  transcript_any:
+  - where were you
+  - tell me what happened
+  - who were you with
+  - what were you doing
+  - i'm going to ask you
+  - do you understand
 miranda_warning:
   type: event
   title: Reading Miranda rights
-  aliases: [miranda, rights_advisory]
-  description: >
-    Officer reads or paraphrases the right to remain silent, that statements can
+  aliases:
+  - miranda
+  - rights_advisory
+  description: 'Officer reads or paraphrases the right to remain silent, that statements can
     be used, and the right to an attorney.
-  how_to_confirm: >
-    Transcript should contain Miranda language. Do not mark this from silence
-    or from "you have the right" about something else (e.g. refuse a search).
-  transcript_any:
-    - "you have the right to remain silent"
-    - "anything you say can and will"
-    - "right to an attorney"
-    - "right to remain silent"
-    - "you have the right to an attorney"
 
+    '
+  how_to_confirm: 'Transcript should contain Miranda language. Do not mark this from silence
+    or from "you have the right" about something else (e.g. refuse a search).
+
+    '
+  transcript_any:
+  - you have the right to remain silent
+  - anything you say can and will
+  - right to an attorney
+  - right to remain silent
+  - you have the right to an attorney
 arrest:
   type: event
   title: Arrest
-  aliases: [taken_into_custody]
-  description: >
-    Person is told they are under arrest or clearly taken into custody
-    (handcuffs, placed in a patrol car as a detainee).
-  how_to_confirm: >
-    Arrest language in transcript and/or visible cuffing plus being put in a car.
-    Standing and talking is not an arrest.
+  aliases:
+  - taken_into_custody
+  description: Person is told they are under arrest or clearly taken into custody (handcuffs,
+    placed in a patrol car as a detainee).
+  how_to_confirm: Arrest language in transcript and/or visible cuffing plus being put in a
+    car. Standing and talking is not an arrest.
   transcript_any:
-    - "you're under arrest"
-    - "you are under arrest"
-    - "put your hands behind"
-    - "i'm placing you under arrest"
-
+  - you're under arrest
+  - you are under arrest
+  - put your hands behind
+  - i'm placing you under arrest
+  - after I've arrested her
+  source: gemini
 handcuffing:
   type: event
   title: Handcuffing
-  description: >
-    Hands being cuffed or flex-cuffed. May accompany an arrest or a detention.
-  how_to_confirm: >
-    Visual of cuffs going on, or transcript "hands behind your back" plus
-    restraint motion.
-  transcript_any:
-    - "hands behind your back"
-    - "turn around"
-  visual_any:
-    - handcuffs being applied
+  description: 'Hands being cuffed or flex-cuffed. May accompany an arrest or a detention.
 
+    '
+  how_to_confirm: 'Visual of cuffs going on, or transcript "hands behind your back" plus restraint
+    motion.
+
+    '
+  transcript_any:
+  - hands behind your back
+  - turn around
+  visual_any:
+  - handcuffs being applied
 search_person:
   type: event
   title: Person search
-  description: >
-    Pat-down or search of a person's clothing or belongings on their body.
-  how_to_confirm: >
-    Officer hands on clothing/pockets, or transcript "I'm going to search you"
-    / "do you have anything in your pockets".
-  transcript_any:
-    - "i'm going to search you"
-    - "do you have anything in your pockets"
-    - "empty your pockets"
-    - "pat you down"
+  description: 'Pat-down or search of a person''s clothing or belongings on their body.
 
+    '
+  how_to_confirm: 'Officer hands on clothing/pockets, or transcript "I''m going to search
+    you" / "do you have anything in your pockets".
+
+    '
+  transcript_any:
+  - i'm going to search you
+  - do you have anything in your pockets
+  - empty your pockets
+  - pat you down
 search_vehicle:
   type: event
   title: Vehicle search
-  description: >
-    Officer looking through a vehicle interior, trunk, or compartments.
-  how_to_confirm: >
-    Officer inside or leaning into the car searching, or consent/search language
-    about the vehicle.
-  transcript_any:
-    - "search the vehicle"
-    - "search the car"
-    - "open the trunk"
-    - "mind if i look"
-    - "consent to search"
+  description: 'Officer looking through a vehicle interior, trunk, or compartments.
 
+    '
+  how_to_confirm: 'Officer inside or leaning into the car searching, or consent/search language
+    about the vehicle.
+
+    '
+  transcript_any:
+  - search the vehicle
+  - search the car
+  - open the trunk
+  - mind if i look
+  - consent to search
 verbal_escalation:
   type: event
   title: Verbal escalation
-  description: >
-    Raised voice, repeated commands, or shouted orders. Not a single calm
-    instruction.
-  how_to_confirm: >
-    Repeated command phrases and/or yelling signal. Sirens alone are not this.
-  any: [yelling, repeated_commands]
-  require_min_signals: 2
-  exclude: [continuous_siren]
-  transcript_any:
-    - "step away"
-    - "get on the ground"
-    - "get down"
-    - "don't move"
-    - "hands up"
-    - "stop resisting"
+  description: 'Raised voice, repeated commands, or shouted orders. Not a single calm instruction.
 
+    '
+  how_to_confirm: 'Repeated command phrases and/or yelling signal. Sirens alone are not this.
+
+    '
+  any:
+  - yelling
+  - repeated_commands
+  require_min_signals: 2
+  exclude:
+  - continuous_siren
+  transcript_any:
+  - step away
+  - get on the ground
+  - get down
+  - don't move
+  - hands up
+  - stop resisting
 physical_restraint:
   type: event
   title: Physical restraint
-  description: >
-    Officer holding, taking to the ground, or otherwise physically controlling
+  description: 'Officer holding, taking to the ground, or otherwise physically controlling
     a person beyond a casual guide of the arm.
-  how_to_confirm: >
-    Impact or sudden motion plus a person being held/taken down. Do not label
+
+    '
+  how_to_confirm: 'Impact or sudden motion plus a person being held/taken down. Do not label
     legal use-of-force conclusions; describe the visible control.
-  any: [loud_impact, sudden_subject_motion]
+
+    '
+  any:
+  - loud_impact
+  - sudden_subject_motion
   require_min_signals: 2
   visual_any:
-    - person taken to the ground
-    - officers holding a person's arms or torso
-
+  - person taken to the ground
+  - officers holding a person's arms or torso
 loud_impact:
   type: event
   title: Loud impact
-  description: >
-    A bang, crash, or similar spike in audio, possibly a door, collision, or fall.
-  how_to_confirm: >
-    loud_impact audio signal and, if possible, a matching visual. Wind and
-    continuous siren are not enough.
-  any: [loud_impact]
-  require_min_signals: 1
+  description: 'A bang, crash, or similar spike in audio, possibly a door, collision, or fall.
 
+    '
+  how_to_confirm: 'loud_impact audio signal and, if possible, a matching visual. Wind and
+    continuous siren are not enough.
+
+    '
+  any:
+  - loud_impact
+  require_min_signals: 1
 foot_pursuit:
   type: event
   title: Foot pursuit
-  description: >
-    Running chase on foot. Camera motion, commands to stop, someone fleeing.
-  how_to_confirm: >
-    Transcript "stop" / "don't run" plus running motion, or clear chase visuals.
-  transcript_any:
-    - "stop running"
-    - "don't run"
-    - "get back here"
+  description: 'Running chase on foot. Camera motion, commands to stop, someone fleeing.
 
+    '
+  how_to_confirm: 'Transcript "stop" / "don''t run" plus running motion, or clear chase visuals.
+
+    '
+  transcript_any:
+  - stop running
+  - don't run
+  - get back here
 vehicle_pursuit:
   type: event
   title: Vehicle pursuit
-  description: >
-    High-speed or continuous following of a vehicle that is not stopping.
-  how_to_confirm: >
-    Radio/pursuit language or extended driving with lights/siren while chasing
-    another car. A parked traffic stop is not a pursuit.
-  transcript_any:
-    - "in pursuit"
-    - "failing to yield"
-    - "vehicle pursuit"
+  description: 'High-speed or continuous following of a vehicle that is not stopping.
 
+    '
+  how_to_confirm: 'Radio/pursuit language or extended driving with lights/siren while chasing
+    another car. A parked traffic stop is not a pursuit.
+
+    '
+  transcript_any:
+  - in pursuit
+  - failing to yield
+  - vehicle pursuit
 field_sobriety_test:
   type: event
   title: Field sobriety test
-  description: >
-    Roadside balance/eye tests (walk and turn, one-leg stand, nystagmus).
-    Observable procedure only — do not label intoxication or a DUI crime.
-  how_to_confirm: >
-    Instructions for walking a line, standing on one leg, or following a light
+  description: Roadside balance/eye tests (walk and turn, one-leg stand, nystagmus). Observable
+    procedure only — do not label intoxication or a DUI crime.
+  how_to_confirm: Instructions for walking a line, standing on one leg, or following a light
     with the eyes.
   transcript_any:
-    - "walk and turn"
-    - "one leg"
-    - "follow the pen"
-    - "follow my finger"
-    - "nystagmus"
-    - "stand on one leg"
-
+  - walk and turn
+  - one leg
+  - follow the pen
+  - follow my finger
+  - nystagmus
+  - stand on one leg
+  - blow into this
+  - breathalyzer
+  aliases:
+  - walk and turn
+  - one leg
+  - follow the pen
+  - follow my finger
+  - nystagmus
+  - stand on one leg
+  source: gemini
 medical_aid:
   type: event
   title: Medical aid
-  description: >
-    First aid, EMS on scene, someone down and being treated.
-  how_to_confirm: >
-    Medical language, visible aid, or a person down being attended.
-  transcript_any:
-    - "are you hurt"
-    - "we need medics"
-    - "ambulance"
-    - "can you hear me"
+  description: 'First aid, EMS on scene, someone down and being treated.
 
+    '
+  how_to_confirm: 'Medical language, visible aid, or a person down being attended.
+
+    '
+  transcript_any:
+  - are you hurt
+  - we need medics
+  - ambulance
+  - can you hear me
 welfare_check:
   type: event
   title: Welfare check
-  description: >
-    Officers checking on a person's wellbeing rather than making a stop or arrest.
-  how_to_confirm: >
-    Language about checking on someone, making sure they are okay, a 911 hangup,
+  description: 'Officers checking on a person''s wellbeing rather than making a stop or arrest.
+
+    '
+  how_to_confirm: 'Language about checking on someone, making sure they are okay, a 911 hangup,
     or similar. Not every greeting is a welfare check.
+
+    '
   transcript_any:
-    - "welfare check"
-    - "making sure you're okay"
-    - "someone called about you"
-    - "are you alright"
+  - welfare check
+  - making sure you're okay
+  - someone called about you
+  - are you alright

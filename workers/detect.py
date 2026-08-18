@@ -7,8 +7,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from workers.annotate import annotate_image, appearance_tag
-from workers.caption import caption_crop, load_captioner
+from workers.annotate import annotate_image, appearance_tag, stamp_clock
+from workers.clock import format_clock
 from workers.clips import load_clip_records, save_clip_record, save_video_status
 from workers.clothing import describe_person_clothing
 from workers.local_tag import attach_local_descriptions
@@ -18,7 +18,7 @@ from workers.splice import build_frame_splice, compose_splice
 
 YOLO_URL = os.environ.get(
     "YOLO_ONNX_URL",
-    "https://huggingface.co/Kalray/yolov8/resolve/main/yolov8s.onnx",
+    "https://huggingface.co/Kalray/yolov8/resolve/main/yolov8n.onnx",
 )
 COCO_KEEP = {
     0: "person",
@@ -26,29 +26,17 @@ COCO_KEEP = {
     2: "car",
     3: "motorcycle",
     5: "bus",
-    6: "train",
     7: "truck",
-    8: "boat",
     9: "traffic light",
     11: "stop sign",
-    13: "bench",
-    14: "bird",
-    15: "cat",
-    16: "dog",
     24: "backpack",
-    25: "umbrella",
     26: "handbag",
-    27: "tie",
     28: "suitcase",
-    32: "sports ball",
-    34: "baseball bat",
     39: "bottle",
     43: "knife",
-    63: "laptop",
     67: "cell phone",
-    73: "book",
 }
-VEHICLE_IDS = {1, 2, 3, 5, 6, 7, 8}
+VEHICLE_IDS = {1, 2, 3, 5, 7}
 INPUT_SIZE = 640
 SCORE_THRESH = 0.28
 NIGHT_SCORE_THRESH = 0.22
@@ -61,14 +49,13 @@ def load_yolo():
 
 def detect_video_clips(video: dict) -> dict:
     session = load_yolo()
-    captioner = load_captioner()
     for record in load_clip_records(video["video_id"]):
         entities = []
         if session is not None:
-            entities = detect_clip_entities(session, record, captioner)
+            entities = detect_clip_entities(session, record)
         models = dict(record.get("model") or {})
         models["detector"] = _detector_name(session)
-        models["captioner"] = "vit-gpt2-onnx" if captioner is not None else "unavailable"
+        models["captioner"] = "skipped"
         record["entities"] = entities
         attach_local_descriptions(record)
         record["model"] = models
@@ -81,7 +68,7 @@ def _load_yolo():
         import onnxruntime as ort
     except ImportError:
         return None
-    name = Path(YOLO_URL.split("?", 1)[0]).name or "yolov8s.onnx"
+    name = Path(YOLO_URL.split("?", 1)[0]).name or "yolov8n.onnx"
     weights = models_dir() / name
     try:
         _download(YOLO_URL, weights)
@@ -105,18 +92,28 @@ def detect_clip_entities(session, record: dict, captioner=None) -> list[dict]:
         record["tagged_splice_uri"] = None
         record["entities"] = []
         return []
-    entities, splice = _detect_clip(session, record, captioner)
+    entities, splice = _detect_clip(session, record)
     record["entities"] = entities
     record["splice_uri"] = splice.get("splice_uri")
     record["tagged_splice_uri"] = splice.get("tagged_splice_uri")
     record["splice_cells"] = splice.get("cell_count") or 0
+    record["cells"] = [
+        {
+            "index": cell.get("index"),
+            "at_s": cell.get("at_s"),
+            "start_ms": cell.get("start_ms"),
+            "clock": cell.get("clock"),
+            "uri": cell.get("uri"),
+        }
+        for cell in splice.get("cells") or []
+    ]
     return entities
 
 
 def _detector_name(session) -> str:
     if session is None:
         return "unavailable"
-    name = Path(YOLO_URL.split("?", 1)[0]).stem or "yolov8s"
+    name = Path(YOLO_URL.split("?", 1)[0]).stem or "yolov8n"
     return f"{name}-onnx"
 
 
@@ -125,7 +122,7 @@ def _detect_clip(session, record: dict, captioner=None) -> tuple[list[dict], dic
     start_s = record["start_ms"] / 1000.0
     end_s = record["end_ms"] / 1000.0
     duration = max(end_s - start_s, 0.1)
-    frame_count = max(6, min(12, int(duration / 15) or 6))
+    frame_count = max(4, min(6, int(duration / 30) or 4))
     clip_dir = clip.parent
     frame_dir = clip_dir / "frames"
     clothing_dir = clip_dir / "clothing"
@@ -136,6 +133,7 @@ def _detect_clip(session, record: dict, captioner=None) -> tuple[list[dict], dic
         clip_dir / "splice.jpg",
         duration,
         frame_count,
+        clip_start_ms=int(record.get("start_ms") or 0),
     )
     detections_by_cell: list[list[dict]] = []
     night_cells = 0
@@ -156,7 +154,6 @@ def _detect_clip(session, record: dict, captioner=None) -> tuple[list[dict], dic
     record["night"] = night_cells >= max(1, len(splice.get("cells") or []) // 2)
     entities = _with_clothing(_clip_inventory(detections_by_cell), clothing_dir)
     _with_plate_crops(entities, clothing_dir)
-    _with_captions(entities, captioner)
     _stamp_image_tags(entities)
     for hits in detections_by_cell:
         _stamp_image_tags(hits)
@@ -204,7 +201,8 @@ def _parse_output(output: np.ndarray, orig_size: tuple[int, int], scale: float, 
         class_scores = row[4:]
         class_id = int(np.argmax(class_scores))
         score = float(class_scores[class_id])
-        if score < thresh or class_id not in COCO_KEEP:
+        min_score = thresh if class_id in {0, 2, 3, 5, 7} else max(thresh, 0.45)
+        if score < min_score or class_id not in COCO_KEEP:
             continue
         cx, cy, w, h = row[:4]
         x1 = (cx - w / 2 - pad[0]) / scale
@@ -333,23 +331,6 @@ def _with_plate_crops(detections: list[dict], dest_dir: Path) -> list[dict]:
     return detections
 
 
-def _with_captions(detections: list[dict], captioner) -> list[dict]:
-    if captioner is None:
-        return detections
-    for item in detections:
-        if item.get("type") != "person":
-            continue
-        frame = Path(item.get("frame_uri") or "")
-        text = caption_crop(captioner, frame, item.get("box"))
-        if not text:
-            continue
-        item["caption"] = text
-        item["image_tag"] = text
-        item["clothing_source"] = "caption"
-        item["needs_vision"] = False
-    return detections
-
-
 def _stamp_image_tags(hits: list[dict]) -> None:
     for item in hits:
         if not item.get("image_tag"):
@@ -361,7 +342,10 @@ def _annotate_cells(splice: dict, detections_by_cell: list[list[dict]], dest: Pa
     for cell, hits in zip(cells, detections_by_cell):
         jpeg = Path(cell["uri"])
         path = annotate_image(jpeg, hits, jpeg)
+        clock = cell.get("clock") or format_clock(cell.get("start_ms"))
+        label = f"cell_{int(cell.get('index') or 0):02d} {clock}"
         if path is not None:
+            stamp_clock(path, label, path)
             cell["tagged_uri"] = str(path)
             cell["uri"] = str(path)
             for item in hits:

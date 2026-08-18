@@ -5,6 +5,7 @@ from pathlib import Path
 
 from PIL import Image
 
+from workers.clock import format_clock
 from workers.media import extract_jpeg
 from workers.night import is_night
 
@@ -13,7 +14,13 @@ CELL_HEIGHT = 180
 SPLICE_COLUMNS = 4
 
 
-def build_frame_splice(clip_path: Path, dest: Path, duration_s: float, frame_count: int) -> dict:
+def build_frame_splice(
+    clip_path: Path,
+    dest: Path,
+    duration_s: float,
+    frame_count: int,
+    clip_start_ms: int = 0,
+) -> dict:
     dest.parent.mkdir(parents=True, exist_ok=True)
     cells = []
     tiles: list[Image.Image] = []
@@ -33,11 +40,14 @@ def build_frame_splice(clip_path: Path, dest: Path, duration_s: float, frame_cou
         except OSError:
             continue
         night, luma = is_night(frame)
+        video_ms = int(clip_start_ms + at_s * 1000)
         tiles.append(_fit_cell(frame, CELL_WIDTH, CELL_HEIGHT))
         cells.append(
             {
                 "index": index,
                 "at_s": round(at_s, 3),
+                "start_ms": video_ms,
+                "clock": format_clock(video_ms),
                 "uri": str(cell_path),
                 "night": night,
                 "luma": round(luma, 1),

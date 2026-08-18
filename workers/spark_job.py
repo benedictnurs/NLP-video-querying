@@ -75,28 +75,7 @@ def _run_spark(todo: list[tuple]) -> None:
             "spark.executorEnv.YOLO_ONNX_URL",
             os.environ.get(
                 "YOLO_ONNX_URL",
-                "https://huggingface.co/Kalray/yolov8/resolve/main/yolov8s.onnx",
-            ),
-        )
-        .config(
-            "spark.executorEnv.CAPTION_ENCODER_URL",
-            os.environ.get(
-                "CAPTION_ENCODER_URL",
-                "https://huggingface.co/Xenova/vit-gpt2-image-captioning/resolve/main/onnx/encoder_model_quantized.onnx",
-            ),
-        )
-        .config(
-            "spark.executorEnv.CAPTION_DECODER_URL",
-            os.environ.get(
-                "CAPTION_DECODER_URL",
-                "https://huggingface.co/Xenova/vit-gpt2-image-captioning/resolve/main/onnx/decoder_model_quantized.onnx",
-            ),
-        )
-        .config(
-            "spark.executorEnv.CAPTION_TOKENIZER_URL",
-            os.environ.get(
-                "CAPTION_TOKENIZER_URL",
-                "https://huggingface.co/Xenova/vit-gpt2-image-captioning/resolve/main/tokenizer.json",
+                "https://huggingface.co/Kalray/yolov8/resolve/main/yolov8n.onnx",
             ),
         )
         .config("spark.executorEnv.CLIP_SECONDS", os.environ.get("CLIP_SECONDS", "180"))
@@ -132,7 +111,7 @@ def _worker_models() -> dict:
     global _WORKER_MODELS
     if _WORKER_MODELS is not None:
         return _WORKER_MODELS
-    whisper = detector = captioner = None
+    whisper = detector = None
     try:
         from workers.asr import load_whisper
 
@@ -145,13 +124,7 @@ def _worker_models() -> dict:
         detector = load_yolo()
     except Exception:
         detector = None
-    try:
-        from workers.caption import load_captioner
-
-        captioner = load_captioner()
-    except Exception:
-        captioner = None
-    _WORKER_MODELS = {"whisper": whisper, "detector": detector, "captioner": captioner}
+    _WORKER_MODELS = {"whisper": whisper, "detector": detector}
     return _WORKER_MODELS
 
 
@@ -162,13 +135,13 @@ def _process_splice(payload: tuple) -> dict:
         path = video_work_dir(video["video_id"]) / "clips" / clip_id / "clip.json"
         return json.loads(path.read_text())
     models = _worker_models()
-    return _cut_and_analyze_clip(payload, models["whisper"], models["detector"], models["captioner"])
+    return _cut_and_analyze_clip(payload, models["whisper"], models["detector"])
 
 
 def _cut_and_analyze_clip(payload: tuple, whisper=None, detector=None, captioner=None) -> dict:
     video, index, start_s, end_s = payload
     record = cut_window(video, index, start_s, end_s)
-    return _analyze_clip(record, whisper, detector, captioner)
+    return _analyze_clip(record, whisper, detector)
 
 
 def _analyze_clip(record: dict, whisper=None, detector=None, captioner=None) -> dict:
@@ -180,12 +153,12 @@ def _analyze_clip(record: dict, whisper=None, detector=None, captioner=None) -> 
 
     transcript, segments, error = transcribe_wav(whisper, Path(record["audio_uri"]))
     signals = audio_signals(Path(record["audio_uri"]))
-    entities = detect_clip_entities(detector, record, captioner)
+    entities = detect_clip_entities(detector, record)
     record["transcript"] = transcript
     record["transcript_segments"] = segments
     if error:
         record["asr_error"] = error
-    record["keyword_hits"] = keyword_hits(transcript)
+    record["keyword_hits"] = keyword_hits(transcript, segments, int(record.get("start_ms") or 0))
     record["signals"] = {
         **signals,
         "repeated_commands": repeated_commands(transcript),
@@ -196,11 +169,11 @@ def _analyze_clip(record: dict, whisper=None, detector=None, captioner=None) -> 
     record["model"] = {
         "asr": os.environ.get("WHISPER_MODEL", "Systran/faster-whisper-tiny.en"),
         "vad": "silero",
-        "detector": "yolov8s-onnx-splice",
-        "captioner": "vit-gpt2-onnx" if captioner is not None else "unavailable",
-        "clothing": "hsv_torso+caption",
+        "detector": "yolov8n-onnx-splice",
+        "captioner": "skipped",
+        "clothing": "hsv_torso",
         "tagger": "local",
-        "audio": "rms_baseline",
+        "audio": "rms_windows",
         "engine": "spark",
     }
     tagged = tag_and_summarize_local(record)
