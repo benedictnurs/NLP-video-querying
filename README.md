@@ -178,6 +178,8 @@ Keyword matching and scoring use the YAML during Spark/score. Gemini scan/enrich
 
 ## Graph (Neo4j)
 
+<img width="1846" height="1434" alt="image" src="https://github.com/user-attachments/assets/854ffae7-dc6e-433a-aeb2-e950c6338d66" />
+
 | Node | Role |
 | --- | --- |
 | Video | One ingested file |
