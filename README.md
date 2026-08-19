@@ -1,6 +1,6 @@
 ## NLP For Body Camera Querying
 
-Investigate police bodycam and dashcam videos using natural language. Data on speech, objects, events, and suspects are all indexed, as well as any nuances. Codex or Cursor searches quickly using the **Code Four** MCP.
+Investigate police bodycam and dashcam videos using natural language. Data on speech, objects, events, and suspects are all indexed, as well as any nuances. By connecting agents to the **Code Four** MCP.
 
 ## How to use
 
