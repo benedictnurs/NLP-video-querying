@@ -2,6 +2,42 @@
 
 Investigate police bodycam and dashcam videos using natural language. Data on speech, objects, events, and suspects are all indexed, as well as any nuances easilt by connecting agents to the **Code Four** MCP.
 
+## Design
+
+```text
+videos/video_N.mp4
+        │
+        ▼
+  ingest_videos (one file at a time)
+        │
+        ├─ copy + ffprobe          cache skip if already graphed
+        ├─ Spark clips             ~3 min windows, overlap
+        │     Whisper, YOLO, splice.jpg
+        ├─ score                   YAML keyword / signal buckets
+        ├─ VLM scan                Gemini labels Event.type + clocks
+        ├─ enrich                  people, summaries; may edit YAML
+        ├─ fingerprint             same person/car/object across clips
+        └─ Neo4j                   Video, Clip, Event, Person, …
+                │
+                ▼
+        Code Four MCP  ←  Codex / Cursor
+                │
+                ├─ query blocks (dui, miranda, timeframe, …)
+                ├─ open splice in Finder
+                └─ analyze_scene (images into the model)
+```
+
+- Airflow runs one video at a time; Spark (ffmpeg, Whisper, YOLO) cuts ~3 minute clips, transcribes, and boxes people/cars on a splice grid.
+- Scoring is just Python on those clips: YAML phrases and loud audio guess Miranda / stop / yelling before any vision model.
+- Gemini Flash Lite (OpenRouter) looks at the splice and buckets it into a catalog id like `traffic_stop` or `miranda_warning` with a clock.
+- Same Gemini pass can add a missing phrase or scene type to the YAML — that's the agentic catalog.
+- It also describes who is on screen; we only draw `person`, we don't feed a guessed shirt color into the model.
+- LangGraph + Gemini 3.5 Flash walks the clips in order and reuses `person_3` / `vehicle_1` when it's the same people and cars.
+- `is_cop` means a uniform is visible; `potential_suspect` is who the officer is talking to, not a charge.
+- That all writes to Neo4j; Code Four (FastMCP) is how Codex/Cursor searches it, opens the splice, or merges two ids if you say they're the same person.
+
+Already-graphed files are cached, so adding `video_2.mp4` does not reprocess `video_1`.
+
 ## How to use
 
 1. Put a file in `videos/` (for example `video_4.mp4`). Wait a few seconds after the copy finishes so the file is stable.
@@ -113,33 +149,6 @@ Restart Cursor after saving. If graph URIs still look like `/opt/airflow/data/..
 | Identity | LangGraph fingerprint agent across clips |
 | Graph | Neo4j 5 |
 | Query | FastMCP stdio server (`graph_mcp`), Cypher query blocks |
-
-## High-level flow
-
-```text
-videos/video_N.mp4
-        │
-        ▼
-  ingest_videos (one file at a time)
-        │
-        ├─ copy + ffprobe          cache skip if already graphed
-        ├─ Spark clips             ~3 min windows, overlap
-        │     Whisper, YOLO, splice.jpg
-        ├─ score                   YAML keyword / signal buckets
-        ├─ VLM scan                Gemini labels Event.type + clocks
-        ├─ enrich                  people, summaries; may edit YAML
-        ├─ fingerprint             same person/car/object across clips
-        └─ Neo4j                   Video, Clip, Event, Person, …
-                │
-                ▼
-        Code Four MCP  ←  Codex / Cursor
-                │
-                ├─ query blocks (dui, miranda, timeframe, …)
-                ├─ open splice in Finder
-                └─ analyze_scene (images into the model)
-```
-
-Graphed files are cached (`data/videos/<stem>/` plus `data/registry.json`). Adding `video_2.mp4` does not reprocess `video_1`.
 
 ## Ingest pipeline (`ingest_videos`)
 
