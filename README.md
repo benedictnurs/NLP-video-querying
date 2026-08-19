@@ -1,8 +1,6 @@
 ## NLP For Body Camera Querying
 
-Investigative index for police bodycam and dashcam. Drop a file in `videos/`, Docker runs it through speech, objects, event buckets, and identity matching, then writes a Neo4j graph. Codex or Cursor searches that graph through the **Code Four** MCP: events, people, vehicles, plates, and scene images.
-
-This is a scene index, not a charging system. `potential_suspect` is who the officer is stopping or questioning. `is_cop` is uniform appearance only. Event ids (`traffic_stop`, `miranda_warning`, `field_sobriety_test`) are observable labels, not charges.
+Investigate police bodycam and dashcam videos using natural language. Data on speech, objects, events, and suspects are all indexed, as well as any nuances. Codex or Cursor searches quickly using the **Code Four** MCP.
 
 ## How to use
 
